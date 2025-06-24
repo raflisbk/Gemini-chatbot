@@ -1556,3 +1556,531 @@ textarea:focus-visible {
   outline-offset: 2px;
   box-shadow: 0 0 0 4px hsl(var(--emerald-500) / 0.2);
 }
+
+/* ========================================
+   ENHANCED ANIMATIONS & UI IMPROVEMENTS
+   Tambahkan ini di AKHIR file globals.css
+   JANGAN HAPUS yang sudah ada!
+   ======================================== */
+
+/* Enhanced Chat Animations */
+@keyframes messageSlideIn {
+  from {
+    opacity: 0;
+    transform: translateY(20px) scale(0.95);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+  }
+}
+
+@keyframes chatItemHover {
+  from {
+    transform: translateX(0);
+    background-color: transparent;
+  }
+  to {
+    transform: translateX(4px);
+    background-color: hsl(var(--muted) / 0.5);
+  }
+}
+
+@keyframes deleteButtonAppear {
+  from {
+    opacity: 0;
+    transform: scale(0.8);
+  }
+  to {
+    opacity: 1;
+    transform: scale(1);
+  }
+}
+
+@keyframes pulseGlow {
+  0%, 100% {
+    box-shadow: 0 0 5px hsl(var(--primary) / 0.3);
+  }
+  50% {
+    box-shadow: 0 0 20px hsl(var(--primary) / 0.6);
+  }
+}
+
+@keyframes floatAnimation {
+  0%, 100% {
+    transform: translateY(0);
+  }
+  50% {
+    transform: translateY(-10px);
+  }
+}
+
+/* Enhanced Chat Message Styling */
+.chat-message-enter {
+  animation: messageSlideIn 0.4s cubic-bezier(0.23, 1, 0.32, 1);
+}
+
+.chat-session-item {
+  transition: all 0.3s cubic-bezier(0.23, 1, 0.32, 1);
+  position: relative;
+  overflow: hidden;
+}
+
+.chat-session-item:hover {
+  transform: translateX(4px);
+  background-color: hsl(var(--muted) / 0.5);
+}
+
+.chat-session-item::before {
+  content: '';
+  position: absolute;
+  top: 0;
+  left: -100%;
+  width: 100%;
+  height: 100%;
+  background: linear-gradient(90deg, 
+    transparent, 
+    rgba(255, 255, 255, 0.1), 
+    transparent);
+  transition: left 0.5s;
+}
+
+.chat-session-item:hover::before {
+  left: 100%;
+}
+
+/* Delete Button Enhancement */
+.delete-button {
+  opacity: 0;
+  transform: scale(0.8);
+  transition: all 0.2s cubic-bezier(0.23, 1, 0.32, 1);
+}
+
+.chat-session-item:hover .delete-button {
+  opacity: 1;
+  transform: scale(1);
+  animation: deleteButtonAppear 0.2s ease-out;
+}
+
+.delete-button:hover {
+  background-color: hsl(var(--destructive) / 0.1);
+  color: hsl(var(--destructive));
+  transform: scale(1.1);
+}
+
+/* Enhanced Login Form Styling */
+.login-backdrop {
+  backdrop-filter: blur(20px);
+  background: rgba(0, 0, 0, 0.6);
+}
+
+.login-container {
+  background: hsl(var(--card) / 0.95);
+  backdrop-filter: blur(20px);
+  border: 1px solid hsl(var(--border) / 0.4);
+  box-shadow: 
+    0 20px 25px -5px rgba(0, 0, 0, 0.1),
+    0 10px 10px -5px rgba(0, 0, 0, 0.04),
+    0 0 0 1px rgba(255, 255, 255, 0.05);
+}
+
+.dark .login-container {
+  background: hsl(var(--card) / 0.8);
+  border: 1px solid hsl(var(--border) / 0.2);
+  box-shadow: 
+    0 20px 25px -5px rgba(0, 0, 0, 0.4),
+    0 10px 10px -5px rgba(0, 0, 0, 0.2),
+    0 0 0 1px rgba(255, 255, 255, 0.1);
+}
+
+/* Demo Account Button Styling */
+.demo-account {
+  background: linear-gradient(135deg, 
+    hsl(var(--primary) / 0.1) 0%, 
+    hsl(var(--primary) / 0.05) 100%);
+  border: 1px solid hsl(var(--primary) / 0.2);
+  transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+  position: relative;
+  overflow: hidden;
+}
+
+.demo-account::before {
+  content: '';
+  position: absolute;
+  top: 0;
+  left: -100%;
+  width: 100%;
+  height: 100%;
+  background: linear-gradient(90deg, 
+    transparent, 
+    rgba(255, 255, 255, 0.1), 
+    transparent);
+  transition: left 0.5s;
+}
+
+.demo-account:hover::before {
+  left: 100%;
+}
+
+.demo-account:hover {
+  transform: translateY(-2px) scale(1.02);
+  box-shadow: 
+    0 10px 25px -5px hsl(var(--primary) / 0.2),
+    0 8px 16px -8px hsl(var(--primary) / 0.1);
+  border-color: hsl(var(--primary) / 0.3);
+}
+
+/* Enhanced Input Field Styling */
+.enhanced-input {
+  transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+  border-radius: 12px;
+  border: 1.5px solid hsl(var(--border) / 0.6);
+  background: hsl(var(--background) / 0.5);
+}
+
+.enhanced-input:focus {
+  border-color: hsl(var(--primary) / 0.5);
+  background: hsl(var(--background));
+  box-shadow: 
+    0 0 0 3px hsl(var(--primary) / 0.1),
+    0 1px 3px rgba(0, 0, 0, 0.1);
+  transform: translateY(-1px);
+}
+
+.enhanced-input:focus + .input-icon {
+  color: hsl(var(--primary));
+  transform: scale(1.1);
+}
+
+.input-icon {
+  transition: all 0.2s ease;
+  color: hsl(var(--muted-foreground));
+}
+
+/* Enhanced Button Styling */
+.enhanced-button {
+  background: linear-gradient(135deg, 
+    hsl(var(--primary)) 0%, 
+    hsl(var(--primary) / 0.8) 100%);
+  border: none;
+  box-shadow: 
+    0 4px 14px 0 hsl(var(--primary) / 0.3),
+    inset 0 1px 0 rgba(255, 255, 255, 0.1);
+  transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+  position: relative;
+  overflow: hidden;
+}
+
+.enhanced-button::after {
+  content: '';
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  width: 0;
+  height: 0;
+  border-radius: 50%;
+  background: rgba(255, 255, 255, 0.2);
+  transform: translate(-50%, -50%);
+  transition: width 0.3s, height 0.3s;
+}
+
+.enhanced-button:hover::after {
+  width: 300px;
+  height: 300px;
+}
+
+.enhanced-button:hover {
+  transform: translateY(-2px);
+  box-shadow: 
+    0 8px 25px 0 hsl(var(--primary) / 0.4),
+    inset 0 1px 0 rgba(255, 255, 255, 0.2);
+}
+
+.enhanced-button:active {
+  transform: translateY(0);
+}
+
+/* Success/Error Message Styling */
+.alert-message {
+  border-radius: 12px;
+  backdrop-filter: blur(10px);
+  border-width: 1px;
+  animation: messageSlideIn 0.3s ease-out;
+}
+
+.alert-success {
+  background: linear-gradient(135deg, 
+    hsl(120, 50%, 95%) 0%, 
+    hsl(120, 60%, 92%) 100%);
+  border-color: hsl(120, 50%, 80%);
+  color: hsl(120, 70%, 25%);
+}
+
+.dark .alert-success {
+  background: linear-gradient(135deg, 
+    hsl(120, 50%, 8%) 0%, 
+    hsl(120, 60%, 5%) 100%);
+  border-color: hsl(120, 50%, 20%);
+  color: hsl(120, 70%, 75%);
+}
+
+.alert-error {
+  background: linear-gradient(135deg, 
+    hsl(0, 50%, 95%) 0%, 
+    hsl(0, 60%, 92%) 100%);
+  border-color: hsl(0, 50%, 80%);
+  color: hsl(0, 70%, 25%);
+}
+
+.dark .alert-error {
+  background: linear-gradient(135deg, 
+    hsl(0, 50%, 8%) 0%, 
+    hsl(0, 60%, 5%) 100%);
+  border-color: hsl(0, 50%, 20%);
+  color: hsl(0, 70%, 75%);
+}
+
+/* Loading Spinner Enhancement */
+.enhanced-spinner {
+  animation: spin 1s linear infinite;
+  filter: drop-shadow(0 0 3px hsl(var(--primary) / 0.5));
+}
+
+@keyframes spin {
+  from {
+    transform: rotate(0deg);
+  }
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+/* Sidebar Enhancement */
+.sidebar-container {
+  background: hsl(var(--card) / 0.6);
+  backdrop-filter: blur(20px);
+  border-right: 1px solid hsl(var(--border) / 0.4);
+  box-shadow: 
+    4px 0 10px -2px rgba(0, 0, 0, 0.1),
+    0 0 0 1px rgba(255, 255, 255, 0.05);
+}
+
+.dark .sidebar-container {
+  background: hsl(var(--card) / 0.4);
+  border-right: 1px solid hsl(var(--border) / 0.2);
+  box-shadow: 
+    4px 0 10px -2px rgba(0, 0, 0, 0.3),
+    0 0 0 1px rgba(255, 255, 255, 0.1);
+}
+
+/* Header Enhancement */
+.header-container {
+  background: hsl(var(--card) / 0.3);
+  backdrop-filter: blur(10px);
+  border-bottom: 1px solid hsl(var(--border) / 0.4);
+}
+
+/* Dialog Enhancement */
+.dialog-overlay {
+  backdrop-filter: blur(8px);
+  background: rgba(0, 0, 0, 0.5);
+}
+
+.dialog-content {
+  background: hsl(var(--card) / 0.95);
+  backdrop-filter: blur(20px);
+  border: 1px solid hsl(var(--border) / 0.4);
+  box-shadow: 
+    0 20px 25px -5px rgba(0, 0, 0, 0.1),
+    0 10px 10px -5px rgba(0, 0, 0, 0.04);
+}
+
+.dark .dialog-content {
+  background: hsl(var(--card) / 0.8);
+  border: 1px solid hsl(var(--border) / 0.2);
+  box-shadow: 
+    0 20px 25px -5px rgba(0, 0, 0, 0.4),
+    0 10px 10px -5px rgba(0, 0, 0, 0.2);
+}
+
+/* Footer Badge Enhancement */
+.footer-badge {
+  background: hsl(var(--muted) / 0.3);
+  border: 1px solid hsl(var(--border) / 0.3);
+  backdrop-filter: blur(8px);
+  transition: all 0.2s ease;
+}
+
+.footer-badge:hover {
+  background: hsl(var(--muted) / 0.5);
+  transform: translateY(-1px);
+}
+
+/* Enhanced Hover Effects */
+.hover-lift {
+  transition: transform 0.2s ease;
+}
+
+.hover-lift:hover {
+  transform: translateY(-2px);
+}
+
+.hover-glow:hover {
+  animation: pulseGlow 2s infinite;
+}
+
+.hover-float {
+  animation: floatAnimation 3s ease-in-out infinite;
+}
+
+/* Enhanced Focus States */
+.focus-ring:focus-visible {
+  outline: 2px solid hsl(var(--primary));
+  outline-offset: 2px;
+  box-shadow: 0 0 0 4px hsl(var(--primary) / 0.1);
+}
+
+/* Responsive Enhancements */
+@media (max-width: 640px) {
+  .chat-session-item:hover {
+    transform: translateX(2px);
+  }
+  
+  .demo-account:hover {
+    transform: translateY(-1px) scale(1.01);
+  }
+  
+  .enhanced-button:hover {
+    transform: none;
+  }
+  
+  .enhanced-input:focus {
+    transform: none;
+  }
+}
+
+@media (max-width: 768px) {
+  .sidebar-container {
+    box-shadow: none;
+    border-right: none;
+  }
+}
+
+/* Dark Mode Specific Enhancements */
+.dark {
+  color-scheme: dark;
+}
+
+.dark .chat-session-item:hover {
+  background-color: hsl(var(--muted) / 0.3);
+}
+
+.dark .demo-account {
+  background: linear-gradient(135deg, 
+    hsl(var(--primary) / 0.15) 0%, 
+    hsl(var(--primary) / 0.08) 100%);
+}
+
+/* Selection Enhancement */
+::selection {
+  background-color: hsl(var(--primary) / 0.2);
+  color: hsl(var(--primary-foreground));
+}
+
+/* Smooth Focus Transitions */
+*:focus {
+  transition: outline 0.2s ease, box-shadow 0.2s ease;
+}
+
+/* High Contrast Mode Support */
+@media (prefers-contrast: high) {
+  .enhanced-input {
+    border: 2px solid hsl(var(--foreground));
+  }
+  
+  .demo-account {
+    border: 2px solid hsl(var(--primary));
+  }
+  
+  .dialog-content {
+    border: 2px solid hsl(var(--foreground));
+  }
+}
+
+/* Reduced Motion Support */
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+  }
+  
+  .hover-float,
+  .enhanced-spinner {
+    animation: none;
+  }
+}
+
+/* Print Styles */
+@media print {
+  .login-backdrop,
+  .dialog-overlay,
+  .sidebar-container {
+    display: none !important;
+  }
+  
+  .chat-session-item,
+  .demo-account,
+  .enhanced-button {
+    background: white !important;
+    color: black !important;
+    box-shadow: none !important;
+  }
+}
+
+/* Utility Classes */
+.text-gradient {
+  background: linear-gradient(135deg, 
+    hsl(var(--foreground)) 0%, 
+    hsl(var(--foreground) / 0.7) 100%);
+  -webkit-background-clip: text;
+  background-clip: text;
+  -webkit-text-fill-color: transparent;
+}
+
+.glass-effect {
+  backdrop-filter: blur(20px);
+  background: hsl(var(--background) / 0.8);
+  border: 1px solid hsl(var(--border) / 0.2);
+}
+
+.dark .glass-effect {
+  background: hsl(var(--background) / 0.6);
+  border: 1px solid hsl(var(--border) / 0.1);
+}
+
+/* Custom Scrollbar Enhancement */
+.custom-scrollbar {
+  scrollbar-width: thin;
+  scrollbar-color: hsl(var(--muted-foreground) / 0.3) transparent;
+}
+
+.custom-scrollbar::-webkit-scrollbar {
+  width: 6px;
+}
+
+.custom-scrollbar::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+.custom-scrollbar::-webkit-scrollbar-thumb {
+  background-color: hsl(var(--muted-foreground) / 0.3);
+  border-radius: 3px;
+  transition: background-color 0.2s;
+}
+
+.custom-scrollbar::-webkit-scrollbar-thumb:hover {
+  background-color: hsl(var(--muted-foreground) / 0.5);
+}
