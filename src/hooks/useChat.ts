@@ -82,6 +82,31 @@ export function useChat() {
     setChatState(prev => ({ ...prev, error: null }));
   }, []);
 
+  // NEW: Load session messages
+  const loadSession = useCallback((messages: Message[]) => {
+    setChatState({
+      messages: messages || [],
+      isLoading: false,
+      error: null,
+    });
+  }, []);
+
+  // NEW: Add message to current session (for loading incrementally)
+  const addMessage = useCallback((message: Message) => {
+    setChatState(prev => ({
+      ...prev,
+      messages: [...prev.messages, message],
+    }));
+  }, []);
+
+  // NEW: Set loading state manually
+  const setLoading = useCallback((loading: boolean) => {
+    setChatState(prev => ({
+      ...prev,
+      isLoading: loading,
+    }));
+  }, []);
+
   return {
     messages: chatState.messages,
     isLoading: chatState.isLoading,
@@ -89,5 +114,8 @@ export function useChat() {
     sendMessage,
     clearMessages,
     clearError,
+    loadSession, // NEW
+    addMessage,  // NEW
+    setLoading,  // NEW
   };
 }
