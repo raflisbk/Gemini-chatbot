@@ -164,8 +164,7 @@ export function useChat() {
       id: generateId(),
       content: content.trim(),
       role: 'user',
-      timestamp: new Date(),
-      attachments: attachments.length > 0 ? attachments : undefined
+      timestamp: new Date()
     };
 
     // Add to conversation memory

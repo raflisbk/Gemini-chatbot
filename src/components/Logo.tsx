@@ -244,7 +244,7 @@ export const brandColors = {
 };
 
 // Utility function to get brand color
-export const getBrandColor = (color: keyof typeof brandColors, shade: keyof typeof brandColors.primary = '500') => {
+export const getBrandColor = (color: keyof typeof brandColors, shade: keyof typeof brandColors.primary = 500) => {
   if (color === 'gradient') {
     return brandColors.gradient;
   }
