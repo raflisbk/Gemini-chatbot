@@ -272,7 +272,7 @@ class TrendingAPI {
       title: trend.title || trend.query,
       category: "Google Trends",
       source: "Google",
-      prompt: `Jelaskan tentang "${trend.title || trend.query}" yang sedang trending di Indonesia. Apa yang membuatnya populer dan bagaimana dampaknya?`,
+      prompt: `${trend.title || trend.query}`,
       popularity: trend.traffic || 100,
       timestamp: new Date()
     }));
@@ -283,7 +283,7 @@ class TrendingAPI {
       title: article.title,
       category: "Berita",
       source: article.source?.name || "News",
-      prompt: `Berikan analisis mendalam tentang berita: "${article.title}". Apa implikasi dan dampaknya bagi Indonesia?`,
+      prompt: `${article.title}`,
       timestamp: article.publishedAt ? new Date(article.publishedAt) : new Date()
     }));
   }

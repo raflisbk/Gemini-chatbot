@@ -63,42 +63,159 @@ export class ChatStorage {
   }
 
   static createSession(firstMessage: Message): ChatSession {
-    const title = this.generateTitle(firstMessage.content);
-    
-    return {
+    const title = this.generateSessionTitle(firstMessage.content);
+    const session: ChatSession = {
       id: generateId(),
       title,
       messages: [firstMessage],
       createdAt: new Date(),
-      updatedAt: new Date()
+      updatedAt: new Date(),
     };
+    
+    this.saveSession(session);
+    return session;
   }
 
-  static updateSessionMessages(sessionId: string, messages: Message[]): void {
-    const sessions = this.getSessions();
-    const sessionIndex = sessions.findIndex(s => s.id === sessionId);
+  static updateSession(sessionId: string, messages: Message[]): void {
+    if (typeof window === 'undefined') return;
     
-    if (sessionIndex >= 0) {
-      sessions[sessionIndex].messages = messages;
-      sessions[sessionIndex].updatedAt = new Date();
+    try {
+      const sessions = this.getSessions();
+      const sessionIndex = sessions.findIndex(s => s.id === sessionId);
       
-      // Update title if this is the first assistant response
-      if (messages.length === 2 && messages[1].role === 'assistant') {
-        sessions[sessionIndex].title = this.generateTitle(messages[0].content);
+      if (sessionIndex >= 0) {
+        const session = sessions[sessionIndex];
+        session.messages = messages;
+        session.updatedAt = new Date();
+        
+        // Update title if it's the default and we have new messages
+        if (session.title.startsWith('Chat') && messages.length > 0) {
+          session.title = this.generateSessionTitle(messages[0].content);
+        }
+        
+        this.saveSession(session);
       }
-      
-      this.saveSession(sessions[sessionIndex]);
+    } catch (error) {
+      console.error('Error updating chat session:', error);
     }
   }
 
-  private static generateTitle(firstMessage: string): string {
-    const words = firstMessage.trim().split(' ');
-    const title = words.slice(0, 6).join(' ');
-    return title.length > 50 ? title.substring(0, 50) + '...' : title;
+  static getSession(sessionId: string): ChatSession | null {
+    const sessions = this.getSessions();
+    return sessions.find(s => s.id === sessionId) || null;
   }
 
   static clearAllSessions(): void {
     if (typeof window === 'undefined') return;
-    localStorage.removeItem(STORAGE_KEY);
+    
+    try {
+      localStorage.removeItem(STORAGE_KEY);
+    } catch (error) {
+      console.error('Error clearing chat sessions:', error);
+    }
+  }
+
+  static exportSessions(): string {
+    const sessions = this.getSessions();
+    return JSON.stringify(sessions, null, 2);
+  }
+
+  static importSessions(jsonData: string): boolean {
+    try {
+      const sessions = JSON.parse(jsonData);
+      
+      // Validate the data structure
+      if (!Array.isArray(sessions)) {
+        throw new Error('Invalid data format: expected array');
+      }
+      
+      // Validate each session
+      sessions.forEach((session, index) => {
+        if (!session.id || !session.title || !Array.isArray(session.messages)) {
+          throw new Error(`Invalid session at index ${index}`);
+        }
+      });
+      
+      // Convert dates and save
+      const validatedSessions = sessions.map((session: any) => ({
+        ...session,
+        createdAt: new Date(session.createdAt),
+        updatedAt: new Date(session.updatedAt),
+        messages: session.messages.map((msg: any) => ({
+          ...msg,
+          timestamp: new Date(msg.timestamp)
+        }))
+      }));
+      
+      localStorage.setItem(STORAGE_KEY, JSON.stringify(validatedSessions));
+      return true;
+    } catch (error) {
+      console.error('Error importing chat sessions:', error);
+      return false;
+    }
+  }
+
+  private static generateSessionTitle(firstMessage: string): string {
+    // Clean and truncate the first message to create a title
+    const cleaned = firstMessage
+      .replace(/[^\w\s]/g, '') // Remove special characters
+      .replace(/\s+/g, ' ') // Normalize whitespace
+      .trim();
+    
+    if (cleaned.length === 0) {
+      return `Chat ${new Date().toLocaleDateString()}`;
+    }
+    
+    // Take first 50 characters and add ellipsis if needed
+    const title = cleaned.length > 50 
+      ? cleaned.substring(0, 47) + '...'
+      : cleaned;
+    
+    return title || `Chat ${new Date().toLocaleDateString()}`;
+  }
+
+  static getSessionStats(): {
+    totalSessions: number;
+    totalMessages: number;
+    oldestSession: Date | null;
+    newestSession: Date | null;
+  } {
+    const sessions = this.getSessions();
+    
+    if (sessions.length === 0) {
+      return {
+        totalSessions: 0,
+        totalMessages: 0,
+        oldestSession: null,
+        newestSession: null
+      };
+    }
+    
+    const totalMessages = sessions.reduce((sum, session) => sum + session.messages.length, 0);
+    const dates = sessions.map(s => s.createdAt);
+    
+    return {
+      totalSessions: sessions.length,
+      totalMessages,
+      oldestSession: new Date(Math.min(...dates.map(d => d.getTime()))),
+      newestSession: new Date(Math.max(...dates.map(d => d.getTime())))
+    };
+  }
+
+  static searchSessions(query: string): ChatSession[] {
+    const sessions = this.getSessions();
+    const lowerQuery = query.toLowerCase();
+    
+    return sessions.filter(session => {
+      // Search in title
+      if (session.title.toLowerCase().includes(lowerQuery)) {
+        return true;
+      }
+      
+      // Search in messages
+      return session.messages.some(message => 
+        message.content.toLowerCase().includes(lowerQuery)
+      );
+    });
   }
 }
