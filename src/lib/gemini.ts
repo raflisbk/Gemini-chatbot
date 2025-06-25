@@ -16,9 +16,9 @@ interface ModelSettings {
 
 // Default settings (fallback)
 const defaultSettings: ModelSettings = {
-  temperature: 0.7,
-  maxTokens: 1024,
-  topP: 0.95,
+  temperature: 1.5,
+  maxTokens: 2048,
+  topP: 1,
   topK: 40,
   systemPrompt: 'You are a helpful AI assistant focused on Indonesian topics and trending discussions. Always respond in a friendly and informative manner.'
 };
@@ -53,7 +53,7 @@ const createModelWithSettings = (settings: ModelSettings) => {
   });
 
   return genAI.getGenerativeModel({
-    model: 'gemini-2.0-flash',
+    model: 'gemini-2.5-flash',
     generationConfig: {
       temperature: settings.temperature,
       topP: settings.topP,

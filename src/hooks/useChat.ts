@@ -139,6 +139,18 @@ export function useChat() {
     }));
   }, []);
 
+  // Validate message structure
+  const validateMessage = (message: any): message is Message => {
+    return (
+      message &&
+      typeof message === 'object' &&
+      typeof message.id === 'string' &&
+      typeof message.content === 'string' &&
+      (message.role === 'user' || message.role === 'assistant') &&
+      (message.timestamp instanceof Date || typeof message.timestamp === 'string')
+    );
+  };
+
   // Send message with file attachments and memory
   const sendMessage = useCallback(async (content: string, files?: File[]) => {
     if (!content.trim() && (!files || files.length === 0)) return;
@@ -345,24 +357,123 @@ export function useChat() {
     setChatState(prev => ({ ...prev, error: null }));
   }, []);
 
-  // Load messages from storage (with memory restoration)
+  // Load messages from storage (with memory restoration) - FIXED VERSION
   const loadMessages = useCallback((messages: Message[]) => {
+    // Validasi input messages
+    if (!Array.isArray(messages)) {
+      console.error('loadMessages: Invalid messages array');
+      return;
+    }
+
+    // Filter dan validasi setiap message
+    const validMessages = messages.filter(msg => {
+      if (!validateMessage(msg)) {
+        console.warn('Invalid message filtered out:', msg);
+        return false;
+      }
+      return true;
+    }).map(msg => ({
+      ...msg,
+      // Ensure timestamp is a Date object
+      timestamp: msg.timestamp instanceof Date ? msg.timestamp : new Date(msg.timestamp)
+    }));
+
+    // Set state dengan messages yang valid
     setChatState(prev => ({
       ...prev,
-      messages
+      messages: validMessages,
+      isLoading: false,
+      error: null
     }));
-    conversationMemory.current = [...messages];
+
+    // Update conversation memory untuk context
+    conversationMemory.current = [...validMessages];
+
+    // Reset continue state karena kita load session yang sudah ada
+    setCanContinue(false);
+    setLastIncompleteMessage(null);
+
+    console.log('Messages loaded successfully:', validMessages.length);
   }, []);
 
+  // Get conversation summary for session management
+  const getConversationSummary = useCallback(() => {
+    if (conversationMemory.current.length === 0) return null;
+    
+    const userMessages = conversationMemory.current.filter(msg => msg.role === 'user');
+    const assistantMessages = conversationMemory.current.filter(msg => msg.role === 'assistant');
+    
+    return {
+      totalMessages: conversationMemory.current.length,
+      userMessages: userMessages.length,
+      assistantMessages: assistantMessages.length,
+      firstMessage: conversationMemory.current[0],
+      lastMessage: conversationMemory.current[conversationMemory.current.length - 1],
+      createdAt: conversationMemory.current[0]?.timestamp,
+      updatedAt: conversationMemory.current[conversationMemory.current.length - 1]?.timestamp
+    };
+  }, []);
+
+  // Export conversation for backup/sharing
+  const exportConversation = useCallback(() => {
+    return {
+      messages: conversationMemory.current,
+      summary: getConversationSummary(),
+      exportedAt: new Date(),
+      version: '1.0'
+    };
+  }, [getConversationSummary]);
+
+  // Import conversation from backup
+  const importConversation = useCallback((conversationData: any) => {
+    try {
+      if (conversationData && Array.isArray(conversationData.messages)) {
+        loadMessages(conversationData.messages);
+        return true;
+      }
+      return false;
+    } catch (error) {
+      console.error('Error importing conversation:', error);
+      return false;
+    }
+  }, [loadMessages]);
+
+  // Get current conversation state
+  const getConversationState = useCallback(() => {
+    return {
+      messages: chatState.messages,
+      isLoading: chatState.isLoading,
+      error: chatState.error,
+      canContinue,
+      messageCount: chatState.messages.length,
+      hasConversation: chatState.messages.length > 0,
+      conversationMemory: conversationMemory.current,
+      summary: getConversationSummary()
+    };
+  }, [chatState, canContinue, getConversationSummary]);
+
   return {
+    // Core state
     messages: chatState.messages,
     isLoading: chatState.isLoading,
     error: chatState.error,
     canContinue,
+    
+    // Core actions
     sendMessage,
     continueMessage,
     clearMessages,
     clearError,
-    loadMessages
+    loadMessages,
+    
+    // Advanced features
+    getConversationSummary,
+    getConversationState,
+    exportConversation,
+    importConversation,
+    
+    // Utility functions
+    validateMessage,
+    processFileAttachments
   };
 }
