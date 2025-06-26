@@ -1,17 +1,21 @@
-import { motion, AnimatePresence } from 'framer-motion';
-import { Bot, User, Copy, ThumbsUp, ThumbsDown, RotateCcw } from 'lucide-react';
-import { Message } from '@/lib/types';
-import { formatTime } from '@/lib/utils';
-import { cn } from '@/lib/utils';
-import { Button } from './ui/button';
-import { useState } from 'react';
+// src/components/ChatMessage.tsx - Enhanced version with additional props
 
-interface ChatMessageProps {
+import React, { useState } from 'react';
+import { motion } from 'framer-motion';
+import { Bot, User, Copy, ThumbsUp, ThumbsDown, RotateCcw, Check } from 'lucide-react';
+import { Message } from '@/lib/types';
+import { formatTimestamp, cn, copyToClipboard } from '@/lib/utils';
+import { Button } from './ui/button';
+
+export interface ChatMessageProps {
   message: Message;
   index: number;
+  showTimestamp?: boolean;
+  compactMode?: boolean;
+  isLastMessage?: boolean;
 }
 
-// Custom markdown parser for proper rendering
+// Enhanced markdown parser for proper rendering
 const parseMarkdown = (text: string): JSX.Element => {
   const lines = text.split('\n');
   const elements: JSX.Element[] = [];
@@ -37,15 +41,18 @@ const parseMarkdown = (text: string): JSX.Element => {
     processedContent = processedContent.replace(/\*(.*?)\*/g, '<em>$1</em>');
     
     // Inline code
-    processedContent = processedContent.replace(/`([^`]+)`/g, '<code>$1</code>');
+    processedContent = processedContent.replace(/`([^`]+)`/g, '<code class="bg-muted px-1 py-0.5 rounded text-sm font-mono">$1</code>');
     
     // Links
-    processedContent = processedContent.replace(/\[([^\]]+)\]\(([^)]+)\)/g, '<a href="$2" target="_blank" rel="noopener noreferrer">$1</a>');
+    processedContent = processedContent.replace(
+      /\[([^\]]+)\]\(([^)]+)\)/g, 
+      '<a href="$2" target="_blank" rel="noopener noreferrer" class="text-primary underline hover:text-primary/80">$1</a>'
+    );
 
     elements.push(
       <p 
         key={`p-${lineIndex}`} 
-        className="mb-2 last:mb-0" 
+        className="mb-2 last:mb-0 leading-relaxed" 
         dangerouslySetInnerHTML={{ __html: processedContent }}
       />
     );
@@ -60,7 +67,7 @@ const parseMarkdown = (text: string): JSX.Element => {
             processedItem = processedItem.replace(/\*\*\*(.*?)\*\*\*/g, '<strong><em>$1</em></strong>');
             processedItem = processedItem.replace(/\*\*(.*?)\*\*/g, '<strong>$1</strong>');
             processedItem = processedItem.replace(/\*(.*?)\*/g, '<em>$1</em>');
-            processedItem = processedItem.replace(/`([^`]+)`/g, '<code>$1</code>');
+            processedItem = processedItem.replace(/`([^`]+)`/g, '<code class="bg-muted px-1 py-0.5 rounded text-sm font-mono">$1</code>');
             
             return (
               <li 
@@ -112,228 +119,218 @@ const parseMarkdown = (text: string): JSX.Element => {
     }
 
     // Handle headers
-    if (line.startsWith('### ')) {
+    if (line.startsWith('#')) {
       if (isInList) {
         processListItems(index);
         isInList = false;
       }
-      const headerText = line.replace('### ', '');
+      const level = line.match(/^#+/)?.[0].length || 1;
+      const text = line.replace(/^#+\s*/, '');
+      const HeaderTag = `h${Math.min(level, 6)}` as keyof JSX.IntrinsicElements;
+      
       elements.push(
-        <h3 key={`h3-${index}`} className="text-lg font-semibold mt-4 mb-2">
-          {headerText}
-        </h3>
-      );
-      return;
-    }
-
-    if (line.startsWith('## ')) {
-      if (isInList) {
-        processListItems(index);
-        isInList = false;
-      }
-      const headerText = line.replace('## ', '');
-      elements.push(
-        <h2 key={`h2-${index}`} className="text-xl font-semibold mt-4 mb-2">
-          {headerText}
-        </h2>
-      );
-      return;
-    }
-
-    if (line.startsWith('# ')) {
-      if (isInList) {
-        processListItems(index);
-        isInList = false;
-      }
-      const headerText = line.replace('# ', '');
-      elements.push(
-        <h1 key={`h1-${index}`} className="text-2xl font-bold mt-4 mb-2">
-          {headerText}
-        </h1>
+        React.createElement(
+          HeaderTag,
+          {
+            key: `header-${index}`,
+            className: cn(
+              "font-semibold mt-6 mb-3 first:mt-0",
+              level === 1 && "text-2xl",
+              level === 2 && "text-xl",
+              level === 3 && "text-lg",
+              level >= 4 && "text-base"
+            )
+          },
+          text
+        )
       );
       return;
     }
 
     // Handle lists
-    if (line.trim().match(/^[\*\-\+]\s+/) || line.trim().match(/^\d+\.\s+/)) {
-      const listContent = line.trim().replace(/^[\*\-\+]\s+/, '').replace(/^\d+\.\s+/, '');
-      listItems.push(listContent);
-      isInList = true;
-      return;
-    }
-
-    // Handle blockquotes
-    if (line.trim().startsWith('> ')) {
-      if (isInList) {
-        processListItems(index);
-        isInList = false;
+    if (line.match(/^[\s]*[-*+]\s+/) || line.match(/^[\s]*\d+\.\s+/)) {
+      if (!isInList) {
+        if (currentElement.trim()) {
+          processCurrentElement(currentElement, index);
+          currentElement = '';
+        }
+        isInList = true;
       }
-      const quoteText = line.replace('> ', '');
-      elements.push(
-        <blockquote key={`quote-${index}`} className="border-l-4 border-primary pl-4 italic text-muted-foreground my-4">
-          {quoteText}
-        </blockquote>
-      );
+      listItems.push(line.replace(/^[\s]*[-*+\d+.]\s+/, ''));
       return;
     }
 
-    // Handle horizontal rules
-    if (line.trim() === '---' || line.trim() === '***') {
-      if (isInList) {
-        processListItems(index);
-        isInList = false;
-      }
-      elements.push(<hr key={`hr-${index}`} className="my-4 border-border" />);
-      return;
-    }
-
-    // Regular paragraph or end of list
-    if (isInList && line.trim() === '') {
+    // Handle regular paragraphs
+    if (isInList) {
       processListItems(index);
       isInList = false;
-      return;
     }
 
-    if (!isInList) {
-      processCurrentElement(line, index);
+    if (line.trim() === '') {
+      if (currentElement.trim()) {
+        processCurrentElement(currentElement, index);
+        currentElement = '';
+      }
+    } else {
+      currentElement += (currentElement ? ' ' : '') + line;
     }
   });
 
-  // Process remaining list items
+  // Process remaining content
   if (isInList) {
     processListItems(lines.length);
   }
+  if (currentElement.trim()) {
+    processCurrentElement(currentElement, lines.length);
+  }
 
-  return <div className="prose prose-sm max-w-none dark:prose-invert">{elements}</div>;
+  return <div className="space-y-2">{elements}</div>;
 };
 
-export function ChatMessage({ message, index }: ChatMessageProps) {
-  const isUser = message.role === 'user';
+export function ChatMessage({ 
+  message, 
+  index, 
+  showTimestamp = true, 
+  compactMode = false, 
+  isLastMessage = false 
+}: ChatMessageProps) {
   const [copied, setCopied] = useState(false);
+  const isUser = message.role === 'user';
 
-  const copyToClipboard = async () => {
-    await navigator.clipboard.writeText(message.content);
-    setCopied(true);
-    setTimeout(() => setCopied(false), 2000);
+  const handleCopyToClipboard = async () => {
+    const success = await copyToClipboard(message.content);
+    if (success) {
+      setCopied(true);
+      setTimeout(() => setCopied(false), 2000);
+    }
   };
 
   return (
     <motion.div
       initial={{ opacity: 0, y: 20 }}
       animate={{ opacity: 1, y: 0 }}
-      transition={{ delay: index * 0.1 }}
+      exit={{ opacity: 0, y: -20 }}
+      transition={{ duration: 0.3, ease: "easeOut" }}
       className={cn(
-        'group flex gap-4 p-6 hover:bg-muted/30 transition-all duration-200 chat-message',
-        isUser ? 'bg-muted/20' : ''
+        "group flex items-start gap-3 p-4 rounded-2xl transition-all duration-200",
+        isUser ? "flex-row-reverse" : "flex-row",
+        compactMode ? "p-2" : "p-4",
+        !isUser && "hover:bg-muted/20"
       )}
     >
       {/* Avatar */}
       <motion.div
         whileHover={{ scale: 1.05 }}
         className={cn(
-          'flex h-8 w-8 shrink-0 select-none items-center justify-center rounded-full border shadow-sm',
+          "flex h-8 w-8 shrink-0 select-none items-center justify-center rounded-full border shadow-sm",
+          compactMode && "h-6 w-6",
           isUser 
-            ? 'bg-gradient-to-br from-blue-500 to-purple-600 text-white border-0' 
-            : 'bg-gradient-to-br from-emerald-500 to-blue-600 text-white border-0'
+            ? "bg-gradient-to-br from-blue-500 to-purple-600 text-white border-0" 
+            : "bg-gradient-to-br from-emerald-500 to-blue-600 text-white border-0"
         )}
       >
         {isUser ? (
-          <User className="h-4 w-4" />
+          <User className={cn("h-4 w-4", compactMode && "h-3 w-3")} />
         ) : (
-          <Bot className="h-4 w-4" />
+          <Bot className={cn("h-4 w-4", compactMode && "h-3 w-3")} />
         )}
       </motion.div>
 
       {/* Message Content */}
-      <div className="flex-1 space-y-2">
+      <div className="flex-1 space-y-2 min-w-0">
         {/* Header */}
-        <div className="flex items-center justify-between">
-          <div className="flex items-center gap-2">
-            <span className="text-sm font-medium">
-              {isUser ? 'You' : 'AI Chatbot'}
-            </span>
-            <span className="text-xs text-muted-foreground">
-              {formatTime(message.timestamp)}
-            </span>
-          </div>
-          
-          {/* Message Actions */}
-          <div className="flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
-            <Button
-              variant="ghost"
-              size="sm"
-              onClick={copyToClipboard}
-              className="h-6 w-6 p-0"
-              title={copied ? 'Copied!' : 'Copy message'}
-            >
-              <motion.div
-                whileHover={{ scale: 1.1 }}
-                whileTap={{ scale: 0.9 }}
-              >
-                <Copy className="h-3 w-3" />
-              </motion.div>
-            </Button>
+        {!compactMode && (
+          <div className="flex items-center justify-between">
+            <div className="flex items-center gap-2">
+              <span className="text-sm font-medium">
+                {isUser ? 'You' : 'AI Assistant'}
+              </span>
+              {showTimestamp && (
+                <span className="text-xs text-muted-foreground">
+                  {formatTimestamp(message.timestamp)}
+                </span>
+              )}
+            </div>
             
-            {!isUser && (
-              <>
-                <Button
-                  variant="ghost"
-                  size="sm"
-                  className="h-6 w-6 p-0"
-                  title="Good response"
+            {/* Message Actions */}
+            <div className="flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
+              <Button
+                variant="ghost"
+                size="sm"
+                onClick={handleCopyToClipboard}
+                className="h-6 w-6 p-0"
+                title={copied ? 'Copied!' : 'Copy message'}
+              >
+                <motion.div
+                  whileHover={{ scale: 1.1 }}
+                  whileTap={{ scale: 0.9 }}
                 >
-                  <ThumbsUp className="h-3 w-3" />
-                </Button>
-                <Button
-                  variant="ghost"
-                  size="sm"
-                  className="h-6 w-6 p-0"
-                  title="Poor response"
-                >
-                  <ThumbsDown className="h-3 w-3" />
-                </Button>
-                <Button
-                  variant="ghost"
-                  size="sm"
-                  className="h-6 w-6 p-0"
-                  title="Regenerate response"
-                >
-                  <RotateCcw className="h-3 w-3" />
-                </Button>
-              </>
-            )}
+                  {copied ? (
+                    <Check className="h-3 w-3 text-green-500" />
+                  ) : (
+                    <Copy className="h-3 w-3" />
+                  )}
+                </motion.div>
+              </Button>
+              
+              {!isUser && (
+                <>
+                  <Button
+                    variant="ghost"
+                    size="sm"
+                    className="h-6 w-6 p-0"
+                    title="Good response"
+                  >
+                    <ThumbsUp className="h-3 w-3" />
+                  </Button>
+                  <Button
+                    variant="ghost"
+                    size="sm"
+                    className="h-6 w-6 p-0"
+                    title="Poor response"
+                  >
+                    <ThumbsDown className="h-3 w-3" />
+                  </Button>
+                  <Button
+                    variant="ghost"
+                    size="sm"
+                    className="h-6 w-6 p-0"
+                    title="Regenerate response"
+                  >
+                    <RotateCcw className="h-3 w-3" />
+                  </Button>
+                </>
+              )}
+            </div>
           </div>
-        </div>
+        )}
 
-        {/* Message Text with Markdown Support */}
+        {/* Message Text with Enhanced Markdown Support */}
         <motion.div
           initial={{ opacity: 0 }}
           animate={{ opacity: 1 }}
           transition={{ delay: 0.1 }}
-          className="prose prose-sm max-w-none dark:prose-invert"
+          className={cn(
+            "prose prose-sm max-w-none dark:prose-invert",
+            "prose-pre:bg-muted prose-pre:border prose-pre:border-border",
+            "prose-code:bg-muted prose-code:px-1 prose-code:py-0.5 prose-code:rounded prose-code:text-sm",
+            "prose-a:text-primary prose-a:no-underline hover:prose-a:underline",
+            compactMode && "text-sm"
+          )}
         >
           {isUser ? (
-            <p className="whitespace-pre-wrap break-words text-foreground leading-relaxed">
-              {message.content}
-            </p>
+            <p className="mb-0 whitespace-pre-wrap break-words">{message.content}</p>
           ) : (
             parseMarkdown(message.content)
           )}
         </motion.div>
 
-        {/* Copy Feedback */}
-        <AnimatePresence>
-          {copied && (
-            <motion.div
-              initial={{ opacity: 0, scale: 0.8 }}
-              animate={{ opacity: 1, scale: 1 }}
-              exit={{ opacity: 0, scale: 0.8 }}
-              className="text-xs text-green-600 font-medium"
-            >
-              ✓ Copied to clipboard
-            </motion.div>
-          )}
-        </AnimatePresence>
+        {/* Compact mode timestamp */}
+        {compactMode && showTimestamp && (
+          <div className="text-xs text-muted-foreground">
+            {formatTimestamp(message.timestamp)}
+          </div>
+        )}
       </div>
     </motion.div>
   );

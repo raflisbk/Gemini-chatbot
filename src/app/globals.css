@@ -2794,3 +2794,289 @@ kbd {
     transform: rotate(360deg);
   }
 }
+
+/* Add these styles to src/app/globals.css */
+
+/* Enhanced file upload animations and styling */
+.file-upload-zone {
+  border: 2px dashed hsl(var(--border));
+  border-radius: 0.75rem;
+  padding: 2rem;
+  text-align: center;
+  transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+  cursor: pointer;
+  position: relative;
+  overflow: hidden;
+}
+
+.file-upload-zone::before {
+  content: '';
+  position: absolute;
+  top: 0;
+  left: -100%;
+  width: 100%;
+  height: 100%;
+  background: linear-gradient(90deg, 
+    transparent, 
+    rgba(var(--primary), 0.1), 
+    transparent);
+  transition: left 0.5s ease;
+}
+
+.file-upload-zone:hover {
+  border-color: hsl(var(--primary) / 0.6);
+  background-color: hsl(var(--primary) / 0.05);
+  transform: translateY(-2px);
+  box-shadow: 0 8px 25px rgba(var(--primary), 0.15);
+}
+
+.file-upload-zone:hover::before {
+  left: 100%;
+}
+
+.file-upload-zone.dragover {
+  border-color: hsl(var(--primary));
+  background-color: hsl(var(--primary) / 0.1);
+  transform: scale(1.02);
+  box-shadow: 0 12px 35px rgba(var(--primary), 0.25);
+}
+
+/* File item animations */
+.file-item {
+  transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+.file-item:hover {
+  background-color: hsl(var(--muted) / 0.7);
+  transform: translateX(4px);
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.1);
+}
+
+/* File type indicators */
+.file-type-badge {
+  background: linear-gradient(135deg, hsl(var(--primary) / 0.1), hsl(var(--primary) / 0.05));
+  border: 1px solid hsl(var(--primary) / 0.2);
+  font-weight: 600;
+  font-size: 0.625rem;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+}
+
+/* Processing animations */
+.processing-overlay {
+  background: rgba(255, 255, 255, 0.9);
+  backdrop-filter: blur(4px);
+  border-radius: inherit;
+}
+
+.dark .processing-overlay {
+  background: rgba(0, 0, 0, 0.9);
+}
+
+/* Enhanced chat message styling for attachments */
+.chat-message-attachment {
+  background: hsl(var(--muted) / 0.3);
+  border: 1px solid hsl(var(--border) / 0.5);
+  border-radius: 0.5rem;
+  padding: 0.75rem;
+  margin: 0.5rem 0;
+  transition: all 0.2s ease;
+}
+
+.chat-message-attachment:hover {
+  background: hsl(var(--muted) / 0.5);
+  border-color: hsl(var(--border));
+}
+
+/* File preview animations */
+@keyframes fileSlideIn {
+  from {
+    opacity: 0;
+    transform: translateY(20px) scale(0.95);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+  }
+}
+
+@keyframes fileSlideOut {
+  from {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+  }
+  to {
+    opacity: 0;
+    transform: translateY(-20px) scale(0.95);
+  }
+}
+
+.file-enter {
+  animation: fileSlideIn 0.3s cubic-bezier(0.23, 1, 0.32, 1);
+}
+
+.file-exit {
+  animation: fileSlideOut 0.2s cubic-bezier(0.23, 1, 0.32, 1);
+}
+
+/* Progress indicators */
+.upload-progress {
+  background: linear-gradient(90deg, 
+    hsl(var(--primary)) 0%, 
+    hsl(var(--primary) / 0.8) 50%, 
+    hsl(var(--primary)) 100%);
+  background-size: 200% 100%;
+  animation: shimmer 2s infinite;
+}
+
+@keyframes shimmer {
+  0% { background-position: -200% 0; }
+  100% { background-position: 200% 0; }
+}
+
+/* File type specific styling */
+.file-icon-image {
+  color: hsl(220, 85%, 57%);
+}
+
+.file-icon-audio {
+  color: hsl(271, 81%, 56%);
+}
+
+.file-icon-video {
+  color: hsl(0, 72%, 51%);
+}
+
+.file-icon-document {
+  color: hsl(142, 76%, 36%);
+}
+
+.file-icon-code {
+  color: hsl(25, 95%, 53%);
+}
+
+.file-icon-archive {
+  color: hsl(45, 93%, 47%);
+}
+
+/* Enhanced tooltips */
+.file-tooltip {
+  background: hsl(var(--popover));
+  border: 1px solid hsl(var(--border));
+  border-radius: 0.375rem;
+  padding: 0.5rem 0.75rem;
+  font-size: 0.75rem;
+  box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.1);
+  z-index: 50;
+}
+
+/* Responsive file display */
+@media (max-width: 640px) {
+  .file-upload-zone {
+    padding: 1.5rem 1rem;
+  }
+  
+  .file-item {
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 0.5rem;
+  }
+  
+  .file-name {
+    max-width: 100%;
+  }
+}
+
+/* Enhanced error states */
+.file-error {
+  background: hsl(var(--destructive) / 0.1);
+  border-color: hsl(var(--destructive) / 0.3);
+  color: hsl(var(--destructive));
+}
+
+.file-error:hover {
+  background: hsl(var(--destructive) / 0.15);
+}
+
+/* Success states */
+.file-success {
+  background: hsl(142, 76%, 36%, 0.1);
+  border-color: hsl(142, 76%, 36%, 0.3);
+}
+
+/* Loading states */
+.file-loading {
+  position: relative;
+  overflow: hidden;
+}
+
+.file-loading::after {
+  content: '';
+  position: absolute;
+  top: 0;
+  left: -100%;
+  width: 100%;
+  height: 100%;
+  background: linear-gradient(90deg, 
+    transparent, 
+    rgba(255, 255, 255, 0.2), 
+    transparent);
+  animation: loading 1.5s infinite;
+}
+
+@keyframes loading {
+  0% { left: -100%; }
+  100% { left: 100%; }
+}
+
+/* Dark mode enhancements */
+.dark .file-upload-zone {
+  border-color: hsl(var(--border));
+  background: hsl(var(--card) / 0.5);
+}
+
+.dark .file-upload-zone:hover {
+  background: hsl(var(--card) / 0.8);
+  border-color: hsl(var(--primary) / 0.8);
+}
+
+.dark .file-item {
+  background: hsl(var(--card) / 0.3);
+  border-color: hsl(var(--border) / 0.3);
+}
+
+.dark .file-item:hover {
+  background: hsl(var(--card) / 0.5);
+  border-color: hsl(var(--border) / 0.5);
+}
+
+/* High contrast mode support */
+@media (prefers-contrast: high) {
+  .file-upload-zone {
+    border-width: 3px;
+    border-color: hsl(var(--foreground));
+  }
+  
+  .file-type-badge {
+    border-width: 2px;
+    font-weight: 700;
+  }
+}
+
+/* Reduced motion support */
+@media (prefers-reduced-motion: reduce) {
+  .file-upload-zone,
+  .file-item,
+  .file-upload-zone::before {
+    transition: none;
+    animation: none;
+  }
+  
+  .file-upload-zone:hover {
+    transform: none;
+  }
+  
+  .file-upload-zone.dragover {
+    transform: none;
+  }
+}
