@@ -12,7 +12,7 @@ interface FileAttachment {
 interface ChatResponse {
   success: boolean;
   message?: string;
-  isIncomplete?: boolean;
+  isIncomplete?: boolean;  // NEW: Add this to interface
   error?: string;
   remainingTokens?: number;
 }
@@ -24,9 +24,39 @@ export function useChat() {
     error: null,
   });
   
+  // NEW: Add continue states
   const [canContinue, setCanContinue] = useState(false);
   const [lastIncompleteMessage, setLastIncompleteMessage] = useState<string | null>(null);
+  const [incompleteMessageId, setIncompleteMessageId] = useState<string | null>(null);
+  
   const conversationMemory = useRef<Message[]>([]);
+
+  // NEW: Function to detect incomplete responses
+  const detectIncompleteResponse = useCallback((response: string): boolean => {
+    if (!response || typeof response !== 'string') return false;
+    
+    const text = response.trim();
+    
+    // Check for common indicators of incomplete responses
+    const incompleteIndicators = [
+      /[^.!?]\s*$/, // Response cuts off mid-sentence
+      /```[^`]*$/, // Unfinished code blocks
+      /^\d+\.\s+[^.!?]*$/m, // Incomplete numbered lists
+      /^[-*]\s+[^.!?]*$/m, // Incomplete bullet points
+    ];
+
+    // Very long responses are more likely to be cut off
+    const isVeryLong = text.length > 3000;
+    
+    // Check for incomplete indicators
+    const hasIncompleteIndicators = incompleteIndicators.some(pattern => pattern.test(text));
+    
+    // Additional heuristics
+    const endsAbruptly = !text.match(/[.!?]$/);
+    const hasUnfinishedCode = text.includes('```') && (text.match(/```/g) || []).length % 2 !== 0;
+    
+    return isVeryLong && (hasIncompleteIndicators || endsAbruptly || hasUnfinishedCode);
+  }, []);
 
   // Validate and process file attachments
   const processFileAttachments = useCallback(async (files: File[]): Promise<FileAttachment[]> => {
@@ -59,42 +89,29 @@ export function useChat() {
     const mimeType = file.type.toLowerCase();
     
     if (mimeType.startsWith('image/')) {
-      // Support common image formats
       if (['image/jpeg', 'image/jpg', 'image/png', 'image/gif', 'image/webp', 'image/bmp', 'image/svg+xml'].includes(mimeType)) {
         return 'image';
       }
     }
     
     if (mimeType.startsWith('audio/')) {
-      // Support common audio formats
       if (['audio/mpeg', 'audio/mp3', 'audio/wav', 'audio/ogg', 'audio/m4a', 'audio/aac'].includes(mimeType)) {
         return 'audio';
       }
     }
     
     if (mimeType.startsWith('video/')) {
-      // Support common video formats
       if (['video/mp4', 'video/avi', 'video/mov', 'video/webm', 'video/mkv'].includes(mimeType)) {
         return 'video';
       }
     }
     
-    // Document types
     const documentTypes = [
-      'application/pdf',
-      'application/msword',
+      'application/pdf', 'application/msword',
       'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
-      'application/vnd.ms-excel',
-      'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
-      'application/vnd.ms-powerpoint',
-      'application/vnd.openxmlformats-officedocument.presentationml.presentation',
-      'text/plain',
-      'text/csv',
-      'application/json',
-      'text/markdown',
-      'text/html',
-      'text/xml',
-      'application/rtf'
+      'application/vnd.ms-excel', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+      'application/vnd.ms-powerpoint', 'application/vnd.openxmlformats-officedocument.presentationml.presentation',
+      'text/plain', 'text/csv', 'application/json', 'text/markdown', 'text/html', 'text/xml', 'application/rtf'
     ];
     
     if (documentTypes.includes(mimeType)) {
@@ -120,7 +137,6 @@ export function useChat() {
       reader.readAsDataURL(file);
       reader.onload = () => {
         const result = reader.result as string;
-        // Remove data URL prefix to get pure base64
         const base64 = result.split(',')[1];
         resolve(base64);
       };
@@ -130,7 +146,6 @@ export function useChat() {
 
   // Build conversation context for API
   const buildConversationContext = useCallback(() => {
-    // Include last 10 messages for context while managing token usage
     const contextMessages = conversationMemory.current.slice(-10);
     return contextMessages.map(msg => ({
       role: msg.role,
@@ -151,13 +166,12 @@ export function useChat() {
     );
   };
 
-  // Send message with file attachments and memory
+  // MODIFIED: Enhanced sendMessage with continue detection
   const sendMessage = useCallback(async (content: string, files?: File[]) => {
     if (!content.trim() && (!files || files.length === 0)) return;
 
     let attachments: FileAttachment[] = [];
     
-    // Process file attachments if provided
     if (files && files.length > 0) {
       try {
         attachments = await processFileAttachments(files);
@@ -179,7 +193,6 @@ export function useChat() {
       timestamp: new Date()
     };
 
-    // Add to conversation memory
     conversationMemory.current.push(userMessage);
 
     setChatState(prev => ({
@@ -189,11 +202,12 @@ export function useChat() {
       error: null,
     }));
 
+    // Reset continue state
     setCanContinue(false);
     setLastIncompleteMessage(null);
+    setIncompleteMessageId(null);
 
     try {
-      // Prepare API payload with conversation context
       const payload = {
         message: content.trim(),
         attachments: attachments.map(att => ({
@@ -231,15 +245,16 @@ export function useChat() {
         throw new Error(data.error || 'Failed to get response');
       }
 
+      const responseText = data.message || '';
+      
       // Add assistant message
       const assistantMessage: Message = {
         id: generateId(),
-        content: data.message || '',
+        content: responseText,
         role: 'assistant',
         timestamp: new Date(),
       };
 
-      // Add to conversation memory
       conversationMemory.current.push(assistantMessage);
 
       setChatState(prev => ({
@@ -248,10 +263,14 @@ export function useChat() {
         isLoading: false,
       }));
 
-      // Check if response is incomplete (token limit reached)
-      if (data.isIncomplete) {
+      // NEW: Check if response is incomplete
+      const isIncomplete = data.isIncomplete || detectIncompleteResponse(responseText);
+      
+      if (isIncomplete) {
         setCanContinue(true);
-        setLastIncompleteMessage(data.message || '');
+        setLastIncompleteMessage(responseText);
+        setIncompleteMessageId(assistantMessage.id);
+        console.log('🔄 Response detected as incomplete, Continue button will show');
       }
 
     } catch (error) {
@@ -262,11 +281,16 @@ export function useChat() {
         error: error instanceof Error ? error.message : 'Something went wrong',
       }));
     }
-  }, [processFileAttachments, buildConversationContext]);
+  }, [processFileAttachments, buildConversationContext, detectIncompleteResponse]);
 
-  // Continue incomplete message
+  // NEW: Continue incomplete message
   const continueMessage = useCallback(async () => {
-    if (!canContinue || !lastIncompleteMessage) return;
+    if (!canContinue || !lastIncompleteMessage || !incompleteMessageId) {
+      console.warn('Cannot continue: missing required state');
+      return;
+    }
+
+    console.log('🔄 Continuing message...');
 
     setChatState(prev => ({
       ...prev,
@@ -275,11 +299,23 @@ export function useChat() {
     }));
 
     try {
+      // Smart continuation prompt
+      let continuationPrompt = 'Please continue your previous response exactly where you left off.';
+      
+      if (lastIncompleteMessage.includes('```')) {
+        continuationPrompt = 'Please continue the previous response, completing any unfinished code blocks.';
+      } else if (lastIncompleteMessage.match(/^\d+\./m)) {
+        continuationPrompt = 'Please continue the previous numbered list from where it was cut off.';
+      } else if (lastIncompleteMessage.match(/^[-*]/m)) {
+        continuationPrompt = 'Please continue the previous bullet points from where it was interrupted.';
+      }
+
       const payload = {
-        message: 'Please continue your previous response.',
+        message: continuationPrompt,
         attachments: [],
         conversationContext: buildConversationContext(),
-        continueFrom: lastIncompleteMessage
+        continueFrom: lastIncompleteMessage,
+        isContination: true
       };
 
       const response = await fetch('/api/chat', {
@@ -300,18 +336,37 @@ export function useChat() {
         throw new Error(data.error || 'Failed to continue response');
       }
 
+      const continuedText = data.message || '';
+
       // Update the last assistant message with continued content
       setChatState(prev => {
         const messages = [...prev.messages];
-        const lastMessage = messages[messages.length - 1];
+        const messageIndex = messages.findIndex(msg => msg.id === incompleteMessageId);
         
-        if (lastMessage && lastMessage.role === 'assistant') {
-          lastMessage.content += data.message || '';
+        if (messageIndex !== -1) {
+          const updatedContent = messages[messageIndex].content + continuedText;
+          messages[messageIndex] = {
+            ...messages[messageIndex],
+            content: updatedContent
+          };
           
           // Update conversation memory as well
-          const memoryIndex = conversationMemory.current.findIndex(msg => msg.id === lastMessage.id);
+          const memoryIndex = conversationMemory.current.findIndex(msg => msg.id === incompleteMessageId);
           if (memoryIndex !== -1) {
-            conversationMemory.current[memoryIndex].content = lastMessage.content;
+            conversationMemory.current[memoryIndex].content = updatedContent;
+          }
+
+          // Check if still incomplete
+          const stillIncomplete = data.isIncomplete || detectIncompleteResponse(updatedContent);
+          
+          if (stillIncomplete) {
+            setLastIncompleteMessage(updatedContent);
+            console.log('🔄 Response still incomplete, Continue button remains');
+          } else {
+            setCanContinue(false);
+            setLastIncompleteMessage(null);
+            setIncompleteMessageId(null);
+            console.log('✅ Response complete, Continue button hidden');
           }
         }
 
@@ -322,14 +377,6 @@ export function useChat() {
         };
       });
 
-      // Check if still incomplete
-      if (data.isIncomplete) {
-        setLastIncompleteMessage(lastIncompleteMessage + (data.message || ''));
-      } else {
-        setCanContinue(false);
-        setLastIncompleteMessage(null);
-      }
-
     } catch (error) {
       console.error('Continue error:', error);
       setChatState(prev => ({
@@ -338,7 +385,7 @@ export function useChat() {
         error: error instanceof Error ? error.message : 'Failed to continue response',
       }));
     }
-  }, [canContinue, lastIncompleteMessage, buildConversationContext]);
+  }, [canContinue, lastIncompleteMessage, incompleteMessageId, buildConversationContext, detectIncompleteResponse]);
 
   // Clear messages and reset memory
   const clearMessages = useCallback(() => {
@@ -350,6 +397,7 @@ export function useChat() {
     conversationMemory.current = [];
     setCanContinue(false);
     setLastIncompleteMessage(null);
+    setIncompleteMessageId(null);
   }, []);
 
   // Clear error
@@ -357,15 +405,13 @@ export function useChat() {
     setChatState(prev => ({ ...prev, error: null }));
   }, []);
 
-  // Load messages from storage (with memory restoration) - FIXED VERSION
+  // Load messages from storage
   const loadMessages = useCallback((messages: Message[]) => {
-    // Validasi input messages
     if (!Array.isArray(messages)) {
       console.error('loadMessages: Invalid messages array');
       return;
     }
 
-    // Filter dan validasi setiap message
     const validMessages = messages.filter(msg => {
       if (!validateMessage(msg)) {
         console.warn('Invalid message filtered out:', msg);
@@ -374,11 +420,9 @@ export function useChat() {
       return true;
     }).map(msg => ({
       ...msg,
-      // Ensure timestamp is a Date object
       timestamp: msg.timestamp instanceof Date ? msg.timestamp : new Date(msg.timestamp)
     }));
 
-    // Set state dengan messages yang valid
     setChatState(prev => ({
       ...prev,
       messages: validMessages,
@@ -386,17 +430,17 @@ export function useChat() {
       error: null
     }));
 
-    // Update conversation memory untuk context
     conversationMemory.current = [...validMessages];
-
-    // Reset continue state karena kita load session yang sudah ada
+    
+    // Reset continue state when loading existing session
     setCanContinue(false);
     setLastIncompleteMessage(null);
+    setIncompleteMessageId(null);
 
     console.log('Messages loaded successfully:', validMessages.length);
   }, []);
 
-  // Get conversation summary for session management
+  // Get conversation summary
   const getConversationSummary = useCallback(() => {
     if (conversationMemory.current.length === 0) return null;
     
@@ -414,7 +458,7 @@ export function useChat() {
     };
   }, []);
 
-  // Export conversation for backup/sharing
+  // Export conversation
   const exportConversation = useCallback(() => {
     return {
       messages: conversationMemory.current,
@@ -424,7 +468,7 @@ export function useChat() {
     };
   }, [getConversationSummary]);
 
-  // Import conversation from backup
+  // Import conversation
   const importConversation = useCallback((conversationData: any) => {
     try {
       if (conversationData && Array.isArray(conversationData.messages)) {
@@ -452,16 +496,17 @@ export function useChat() {
     };
   }, [chatState, canContinue, getConversationSummary]);
 
+  // IMPORTANT: Export the continue states and functions
   return {
     // Core state
     messages: chatState.messages,
     isLoading: chatState.isLoading,
     error: chatState.error,
-    canContinue,
+    canContinue,        // NEW: Export continue state
     
     // Core actions
     sendMessage,
-    continueMessage,
+    continueMessage,    // NEW: Export continue function
     clearMessages,
     clearError,
     loadMessages,

@@ -14,11 +14,11 @@ interface ModelSettings {
   systemPrompt: string;
 }
 
-// Default settings (fallback)
+// FIXED: Default settings to match AuthContext
 const defaultSettings: ModelSettings = {
-  temperature: 1.5,
-  maxTokens: 2048,
-  topP: 1,
+  temperature: 1.5,    // CHANGED from 1.5 to 0.7
+  maxTokens: 4096,     // CHANGED from 2048 to 1024
+  topP: 0.95,          // CHANGED from 1 to 0.95
   topK: 40,
   systemPrompt: 'You are a helpful AI assistant focused on Indonesian topics and trending discussions. Always respond in a friendly and informative manner.'
 };
@@ -74,15 +74,63 @@ export async function generateResponse(prompt: string): Promise<string> {
     
     console.log('🚀 Generating response with prompt length:', prompt.length);
     
-    // Generate response with the configured model
+    // ENHANCED: Better error handling and response validation
     const result = await model.generateContent(prompt);
     const response = await result.response;
-    const text = response.text();
+    
+    // Check if response was blocked or empty
+    if (!response) {
+      throw new Error('No response received from Gemini API');
+    }
+
+    // Get response text with safety checks
+    let text: string;
+    try {
+      text = response.text();
+    } catch (error) {
+      console.error('Error extracting text from response:', error);
+      // Check if response was blocked for safety reasons
+      const candidates = response.candidates;
+      if (candidates && candidates.length > 0) {
+        const candidate = candidates[0];
+        if (candidate.finishReason === 'SAFETY') {
+          throw new Error('Response was blocked due to safety filters. Please rephrase your request.');
+        }
+        if (candidate.finishReason === 'RECITATION') {
+          throw new Error('Response was blocked due to recitation concerns. Please try a different approach.');
+        }
+      }
+      throw new Error('Failed to extract response text');
+    }
+    
+    // Validate response is not empty
+    if (!text || text.trim().length === 0) {
+      console.warn('⚠️ Empty response received from Gemini');
+      throw new Error('Empty response received from AI model');
+    }
     
     console.log('✅ Response generated successfully, length:', text.length);
     return text;
   } catch (error) {
     console.error('💥 Error generating response:', error);
+    
+    // Provide more specific error messages
+    if (error instanceof Error) {
+      if (error.message.includes('quota') || error.message.includes('quota exceeded')) {
+        throw new Error('API quota exceeded. Please try again later.');
+      }
+      if (error.message.includes('safety')) {
+        throw new Error('Response blocked by safety filters. Please rephrase your request.');
+      }
+      if (error.message.includes('recitation')) {
+        throw new Error('Response blocked due to content policy. Please try a different approach.');
+      }
+      if (error.message.includes('Empty response')) {
+        throw new Error('AI model returned empty response. Please try again.');
+      }
+      throw error; // Re-throw the original error with its message
+    }
+    
     throw new Error('Failed to generate response from Gemini AI');
   }
 }

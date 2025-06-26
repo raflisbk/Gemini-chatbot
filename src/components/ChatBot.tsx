@@ -21,12 +21,15 @@ import {
   Menu,
   Search,
   Clock,
-  Trash2
+  Trash2,
+  Sparkles,
+  Paperclip
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { ScrollArea } from '@/components/ui/scroll-area';
 import { ChatMessage } from '@/components/ChatMessage';
+import { ContinueButton } from '@/components/ContinueButton';
 import { LoadingDots } from '@/components/LoadingDots';
 import { ThemeToggle } from '@/components/ThemeToggle';
 import { SettingsDialog } from '@/components/SettingsDialog';
@@ -61,8 +64,19 @@ export function ChatBot() {
   const fileInputRef = useRef<HTMLInputElement>(null);
   const sidebarRef = useRef<HTMLDivElement>(null);
   
-  // Updated useChat hook dengan loadMessages
-  const { messages, isLoading, error, sendMessage, clearMessages, clearError, loadMessages } = useChat();
+  // Updated useChat hook dengan loadMessages + Continue functionality
+  const { 
+    messages, 
+    isLoading, 
+    error, 
+    canContinue,        // NEW: Continue state
+    sendMessage, 
+    continueMessage,    // NEW: Continue function
+    clearMessages, 
+    clearError, 
+    loadMessages 
+  } = useChat();
+  
   const { user, logout, updateUsage, remainingQuota, isAdmin, isAuthenticated, isGuest } = useAuth();
 
   // Responsive breakpoint detection
@@ -331,6 +345,15 @@ export function ChatBot() {
     inputRef.current?.focus();
   };
 
+  // NEW: Handle continue message
+  const handleContinue = async () => {
+    try {
+      await continueMessage();
+    } catch (error) {
+      console.error('Failed to continue message:', error);
+    }
+  };
+
   // Format usage display
   const getUsageDisplay = (): string => {
     if (isAuthenticated) {
@@ -403,110 +426,124 @@ export function ChatBot() {
                 
                 {/* New Chat Button */}
                 <Button 
-                  onClick={handleNewChat}
-                  className="w-full bg-gradient-to-r from-emerald-500 to-blue-500 hover:from-emerald-600 hover:to-blue-600 text-white border-0 shadow-lg hover:shadow-xl transition-all duration-300"
+                  onClick={handleNewChat} 
+                  className="w-full bg-gradient-to-r from-emerald-500 to-blue-500 hover:from-emerald-600 hover:to-blue-600 text-white font-medium gap-2 shadow-lg hover:shadow-xl transition-all duration-200"
+                  size="lg"
                 >
-                  <Plus className="h-4 w-4 mr-2" />
-                  New Chat
+                  <Plus className="h-4 w-4" />
+                  New Conversation
                 </Button>
               </div>
 
-              {/* Search */}
-              {isAuthenticated && chatSessions.length > 0 && (
-                <div className="p-4 border-b border-border">
-                  <div className="relative">
-                    <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 h-4 w-4 text-muted-foreground" />
-                    <Input
-                      id="chat-search"
-                      placeholder="Search chats..."
-                      value={searchQuery}
-                      onChange={(e) => setSearchQuery(e.target.value)}
-                      className="pl-10 bg-background/50 border-muted focus:border-primary transition-colors"
-                    />
-                  </div>
-                </div>
-              )}
-
-              {/* Main Content */}
+              {/* Sidebar Body */}
               <ScrollArea className="flex-1 px-4">
-                <div className="py-4 space-y-6">
-                  {/* Chat History - untuk authenticated users */}
+                <div className="space-y-6 py-4">
+                  {/* Search */}
                   {isAuthenticated && (
-                    <>
-                      <div className="flex items-center justify-between mb-2">
-                        <h3 className="text-xs font-medium text-muted-foreground">Recent Chats</h3>
-                        {chatSessions.length > 0 && (
-                          <span className="text-xs text-muted-foreground">
-                            {filteredSessions.length}/{chatSessions.length}
-                          </span>
+                    <div className="relative">
+                      <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 h-4 w-4 text-muted-foreground" />
+                      <Input
+                        id="chat-search"
+                        placeholder="Search conversations..."
+                        value={searchQuery}
+                        onChange={(e) => setSearchQuery(e.target.value)}
+                        className="pl-9 bg-muted/30 border-border focus:bg-background transition-colors"
+                      />
+                    </div>
+                  )}
+
+                  {/* Chat Sessions */}
+                  {isAuthenticated ? (
+                    <div>
+                      <h3 className="text-xs font-medium text-muted-foreground mb-3 uppercase tracking-wider">Recent Conversations</h3>
+                      <div className="space-y-2">
+                        {filteredSessions.slice(0, 10).map((session) => (
+                          <motion.div
+                            key={session.id}
+                            initial={{ opacity: 0, y: 10 }}
+                            animate={{ opacity: 1, y: 0 }}
+                            whileHover={{ x: 4, scale: 1.02 }}
+                            whileTap={{ scale: 0.98 }}
+                            onClick={() => handleSessionSelect(session)}
+                            className={`
+                              group p-3 rounded-xl cursor-pointer transition-all duration-200 border
+                              ${currentSessionId === session.id
+                                ? 'bg-primary/10 border-primary/30 shadow-lg shadow-primary/10'
+                                : 'bg-muted/30 hover:bg-muted/50 border-transparent hover:border-border'
+                              }
+                            `}
+                          >
+                            <div className="flex items-start justify-between gap-2">
+                              <div className="flex-1 min-w-0">
+                                <p className="text-sm font-medium truncate mb-1">
+                                  {session.title}
+                                </p>
+                                <div className="flex items-center gap-2 text-xs text-muted-foreground">
+                                  <span>{session.messages.length} messages</span>
+                                  <span>•</span>
+                                  <span>{session.updatedAt.toLocaleDateString()}</span>
+                                </div>
+                              </div>
+                              <Button
+                                variant="ghost"
+                                size="sm"
+                                onClick={(e) => handleDeleteSession(session.id, e)}
+                                className="opacity-0 group-hover:opacity-100 transition-opacity h-6 w-6 p-0 hover:bg-destructive/10 hover:text-destructive"
+                              >
+                                <Trash2 className="h-3 w-3" />
+                              </Button>
+                            </div>
+                          </motion.div>
+                        ))}
+                        
+                        {filteredSessions.length === 0 && (
+                          <div className="text-center py-8 text-muted-foreground">
+                            <FileText className="h-8 w-8 mx-auto mb-3 opacity-50" />
+                            <p className="text-sm font-medium mb-1">
+                              {searchQuery ? 'No conversations found' : 'No conversations yet'}
+                            </p>
+                            <p className="text-xs">
+                              {searchQuery ? 'Try a different search term' : 'Start a conversation to see your chats here'}
+                            </p>
+                          </div>
                         )}
                       </div>
-                      
-                      {filteredSessions.length > 0 ? (
-                        <div className="space-y-1">
-                          {filteredSessions.slice(0, 20).map((session) => (
-                            <motion.div
-                              key={session.id}
-                              initial={{ opacity: 0, y: 10 }}
-                              animate={{ opacity: 1, y: 0 }}
-                              className="group relative"
-                            >
-                              <motion.button
-                                whileHover={{ scale: 1.01, x: 4 }}
-                                whileTap={{ scale: 0.99 }}
-                                onClick={() => handleSessionSelect(session)}
-                                className={`w-full p-4 text-left rounded-xl border transition-all group ${
-                                  currentSessionId === session.id
-                                    ? 'bg-primary/10 border-primary shadow-md'
-                                    : 'hover:bg-muted/50 border-border hover:border-muted-foreground/20'
-                                } chat-session-item`}
-                              >
-                                <div className="flex items-start justify-between">
-                                  <div className="flex-1 min-w-0">
-                                    <h4 className="text-sm font-medium truncate text-foreground">
-                                      {session.title}
-                                    </h4>
-                                    <div className="flex items-center gap-2 mt-1">
-                                      <Clock className="h-3 w-3 text-muted-foreground" />
-                                      <span className="text-xs text-muted-foreground">
-                                        {new Date(session.updatedAt).toLocaleDateString()}
-                                      </span>
-                                      <span className="text-xs text-muted-foreground">
-                                        • {session.messages.length} messages
-                                      </span>
-                                    </div>
-                                  </div>
-                                  
-                                  <Button
-                                    variant="ghost"
-                                    size="sm"
-                                    onClick={(e) => handleDeleteSession(session.id, e)}
-                                    className="opacity-0 group-hover:opacity-100 transition-opacity delete-button hover:bg-destructive/10 hover:text-destructive"
-                                  >
-                                    <Trash2 className="h-3 w-3" />
-                                  </Button>
-                                </div>
-                              </motion.button>
-                            </motion.div>
-                          ))}
-                        </div>
-                      ) : (
-                        <div className="text-center py-8">
-                          <Clock className="h-12 w-12 text-muted-foreground/30 mx-auto mb-3" />
-                          <p className="text-sm text-muted-foreground">
-                            {searchQuery ? 'No chats found' : 'No chat history yet'}
-                          </p>
-                          <p className="text-xs text-muted-foreground mt-1">
-                            {searchQuery ? 'Try a different search term' : 'Start a conversation to see your chats here'}
-                          </p>
-                        </div>
-                      )}
-                    </>
+                    </div>
+                  ) : (
+                    <div className="text-center py-8">
+                      <div className="bg-gradient-to-br from-emerald-500/10 to-blue-500/10 rounded-xl p-6 border border-primary/20">
+                        <motion.div
+                          animate={{ 
+                            rotate: [0, 10, -10, 0],
+                            scale: [1, 1.1, 1]
+                          }}
+                          transition={{ 
+                            duration: 2,
+                            repeat: Infinity,
+                            repeatType: "reverse"
+                          }}
+                          className="mb-4"
+                        >
+                          <Sparkles className="h-12 w-12 mx-auto text-primary" />
+                        </motion.div>
+                        <h3 className="font-semibold mb-2">Welcome to ChatBot AI</h3>
+                        <p className="text-sm text-muted-foreground mb-4 leading-relaxed">
+                          Sign in to save your conversations, get more daily messages, and access premium features.
+                        </p>
+                        <Button 
+                          onClick={() => setLoginOpen(true)}
+                          className="w-full bg-gradient-to-r from-emerald-500 to-blue-500 hover:from-emerald-600 hover:to-blue-600 text-white"
+                        >
+                          <LogIn className="h-4 w-4 mr-2" />
+                          Sign In
+                        </Button>
+                      </div>
+                    </div>
                   )}
 
                   {/* Trending Topics */}
                   <div>
-                    <h3 className="text-xs font-medium text-muted-foreground mb-3">Trending Topics</h3>
+                    <h3 className="text-xs font-medium text-muted-foreground mb-3 uppercase tracking-wider">Trending Topics</h3>
                     {loadingTrending ? (
                       <div className="space-y-2">
                         {Array.from({ length: 3 }).map((_, i) => (
@@ -535,7 +572,7 @@ export function ChatBot() {
 
                   {/* Code Templates */}
                   <div>
-                    <h3 className="text-xs font-medium text-muted-foreground mb-3">Code Templates</h3>
+                    <h3 className="text-xs font-medium text-muted-foreground mb-3 uppercase tracking-wider">Code Templates</h3>
                     <div className="space-y-1">
                       {[
                         "Create a React component",
@@ -588,40 +625,52 @@ export function ChatBot() {
                         <div>
                           <p className="text-sm font-medium">{user?.name || user?.email}</p>
                           <p className="text-xs text-muted-foreground">
-                            {isAdmin ? 'Admin' : 'User'}
+                            {isAdmin ? 'Administrator' : 'User'}
                           </p>
                         </div>
                       </div>
                     </div>
-                    
+
                     <div className="flex gap-2">
-                      <Button 
-                        variant="outline" 
-                        size="sm" 
+                      <Button
+                        variant="outline"
+                        size="sm"
                         onClick={() => setSettingsOpen(true)}
-                        className="flex-1"
+                        className="flex-1 gap-2"
                       >
-                        <Settings className="h-4 w-4 mr-2" />
+                        <Settings className="h-3 w-3" />
                         Settings
                       </Button>
-                      <Button 
-                        variant="outline" 
-                        size="sm" 
+                      <Button
+                        variant="outline"
+                        size="sm"
                         onClick={handleLogout}
-                        className="hover:bg-destructive/10 hover:text-destructive hover:border-destructive/20"
+                        className="gap-2"
                       >
-                        <LogOut className="h-4 w-4" />
+                        <LogOut className="h-3 w-3" />
                       </Button>
                     </div>
                   </div>
                 ) : (
-                  <Button 
-                    onClick={() => setLoginOpen(true)}
-                    className="w-full bg-gradient-to-r from-emerald-500 to-blue-500 hover:from-emerald-600 hover:to-blue-600 text-white"
-                  >
-                    <LogIn className="h-4 w-4 mr-2" />
-                    Sign In
-                  </Button>
+                  <div className="space-y-2">
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      onClick={() => setSettingsOpen(true)}
+                      className="w-full gap-2"
+                    >
+                      <Settings className="h-4 w-4" />
+                      Settings
+                    </Button>
+                    <Button
+                      onClick={() => setLoginOpen(true)}
+                      className="w-full bg-gradient-to-r from-emerald-500 to-blue-500 hover:from-emerald-600 hover:to-blue-600 text-white gap-2"
+                      size="sm"
+                    >
+                      <LogIn className="h-4 w-4" />
+                      Sign In
+                    </Button>
+                  </div>
                 )}
               </div>
             </motion.div>
@@ -630,9 +679,9 @@ export function ChatBot() {
       </AnimatePresence>
 
       {/* Main Content */}
-      <div className="flex-1 flex flex-col relative">
+      <div className="flex-1 flex flex-col relative overflow-hidden">
         {/* Header */}
-        <div className="flex items-center justify-between p-4 border-b border-border bg-card/50 backdrop-blur-xl sticky top-0 z-30">
+        <div className="flex items-center justify-between p-4 bg-card/50 backdrop-blur-xl border-b border-border relative z-10">
           <div className="flex items-center gap-3">
             <Button
               variant="ghost"
@@ -640,7 +689,7 @@ export function ChatBot() {
               onClick={() => setSidebarOpen(!sidebarOpen)}
               className="hover:bg-muted"
             >
-              {sidebarOpen ? <X className="h-4 w-4" /> : <Menu className="h-4 w-4" />}
+              {sidebarOpen ? <Sidebar className="h-4 w-4" /> : <Menu className="h-4 w-4" />}
             </Button>
             <div className="flex items-center gap-2">
               <Logo className="w-6 h-6" />
@@ -661,114 +710,102 @@ export function ChatBot() {
           </div>
         </div>
 
-        {/* Chat Area */}
-        <div className="flex-1 flex flex-col overflow-hidden">
-          <ScrollArea className="flex-1 p-4" ref={scrollAreaRef}>
-            <div className="max-w-4xl mx-auto space-y-6">
-              {/* Welcome Message */}
+        {/* Chat Container */}
+        <div className="flex-1 flex flex-col relative overflow-hidden">
+          {/* Messages Area */}
+          <ScrollArea className="flex-1" ref={scrollAreaRef}>
+            <div className="max-w-4xl mx-auto p-4 space-y-6">
+              {/* Welcome Screen */}
               {messages.length === 0 && showSuggestions && (
                 <motion.div
                   initial={{ opacity: 0, y: 20 }}
                   animate={{ opacity: 1, y: 0 }}
-                  className="text-center py-12"
+                  className="text-center py-16"
                 >
-                  <div className="mb-8">
-                    <div className="w-16 h-16 bg-gradient-to-r from-emerald-500 to-blue-500 rounded-2xl flex items-center justify-center mx-auto mb-4 shadow-lg">
-                      <Logo className="w-8 h-8 text-white" />
+                  <motion.div
+                    animate={{ 
+                      rotate: [0, 5, -5, 0],
+                      scale: [1, 1.05, 1]
+                    }}
+                    transition={{ 
+                      duration: 3,
+                      repeat: Infinity,
+                      repeatType: "reverse"
+                    }}
+                    className="mb-8"
+                  >
+                    <div className="w-20 h-20 bg-gradient-to-br from-emerald-500 to-blue-500 rounded-3xl flex items-center justify-center mx-auto mb-6 shadow-2xl shadow-emerald-500/25">
+                      <Logo className="w-10 h-10 text-white" />
                     </div>
-                    <h1 className="text-3xl font-bold mb-2 bg-gradient-to-r from-emerald-600 to-blue-600 bg-clip-text text-transparent">
-                      Welcome to ChatBot AI
-                    </h1>
-                    <p className="text-muted-foreground max-w-md mx-auto">
-                      Your intelligent assistant for everything. Ask questions, get code help, or have a conversation.
-                    </p>
-                  </div>
+                  </motion.div>
+
+                  <h1 className="text-4xl font-bold mb-4 bg-gradient-to-r from-emerald-600 via-blue-600 to-purple-600 bg-clip-text text-transparent">
+                    Welcome to ChatBot AI
+                  </h1>
+                  <p className="text-muted-foreground max-w-md mx-auto mb-8 text-lg leading-relaxed">
+                    Your intelligent assistant for everything. Ask questions, get code help, brainstorm ideas, or have a conversation about trending topics.
+                  </p>
 
                   {/* Quick Actions */}
-                  <div className="grid gap-4 max-w-2xl mx-auto">
-                    <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                      {[
-                        {
-                          icon: <Code className="h-5 w-5" />,
-                          title: "Code Help",
-                          description: "Get programming assistance",
-                          prompt: "Help me write a function to..."
-                        },
-                        {
-                          icon: <FileText className="h-5 w-5" />,
-                          title: "Writing",
-                          description: "Create content and documents",
-                          prompt: "Write a professional email about..."
-                        },
-                        {
-                          icon: <Search className="h-5 w-5" />,
-                          title: "Research",
-                          description: "Get information and analysis",
-                          prompt: "Explain the concept of..."
-                        },
-                        {
-                          icon: <User className="h-5 w-5" />,
-                          title: "Personal Assistant",
-                          description: "Daily tasks and planning",
-                          prompt: "Help me plan my..."
-                        }
-                      ].map((action, index) => (
-                        <motion.button
-                          key={action.title}
-                          initial={{ opacity: 0, y: 20 }}
-                          animate={{ opacity: 1, y: 0 }}
-                          transition={{ delay: index * 0.1 }}
-                          whileHover={{ scale: 1.05, y: -2 }}
-                          whileTap={{ scale: 0.95 }}
-                          onClick={() => handleSuggestionClick(action.prompt)}
-                          className="p-6 border border-border rounded-xl hover:border-primary/50 transition-all bg-card/50 backdrop-blur-sm hover:shadow-lg group"
-                        >
-                          <div className="flex items-center gap-4">
-                            <div className="w-12 h-12 bg-gradient-to-r from-emerald-500/10 to-blue-500/10 rounded-lg flex items-center justify-center text-primary group-hover:from-emerald-500/20 group-hover:to-blue-500/20 transition-colors">
-                              {action.icon}
-                            </div>
-                            <div className="text-left">
-                              <h3 className="font-medium text-foreground">{action.title}</h3>
-                              <p className="text-sm text-muted-foreground">{action.description}</p>
-                            </div>
-                          </div>
-                        </motion.button>
-                      ))}
-                    </div>
+                  <div className="grid grid-cols-2 md:grid-cols-4 gap-4 max-w-2xl mx-auto mb-12">
+                    {[
+                      { icon: Code, label: "Code Help", action: () => setIsCodeMode(true) },
+                      { icon: FileText, label: "Writing", action: () => setInput("Help me write") },
+                      { icon: Sparkles, label: "Ideas", action: () => setInput("Give me creative ideas for") },
+                      { icon: Search, label: "Research", action: () => setInput("Research and explain") },
+                    ].map((item, index) => (
+                      <motion.button
+                        key={item.label}
+                        initial={{ opacity: 0, y: 20 }}
+                        animate={{ opacity: 1, y: 0 }}
+                        transition={{ delay: index * 0.1 }}
+                        whileHover={{ scale: 1.05, y: -2 }}
+                        whileTap={{ scale: 0.95 }}
+                        onClick={item.action}
+                        className="p-4 rounded-xl bg-muted/50 hover:bg-muted border border-border hover:border-primary/30 transition-all group"
+                      >
+                        <item.icon className="h-6 w-6 mx-auto mb-2 text-muted-foreground group-hover:text-primary transition-colors" />
+                        <p className="text-sm font-medium">{item.label}</p>
+                      </motion.button>
+                    ))}
                   </div>
-                </motion.div>
-              )}
 
-              {/* Messages */}
-              <AnimatePresence mode="popLayout">
-                {messages.map((message, index) => (
-                  <motion.div
-                    key={message.id}
-                    initial={{ opacity: 0, y: 20, scale: 0.95 }}
-                    animate={{ opacity: 1, y: 0, scale: 1 }}
-                    exit={{ opacity: 0, y: -20, scale: 0.95 }}
-                    transition={{ 
-                      type: "spring", 
-                      damping: 20, 
-                      stiffness: 100,
-                      delay: index * 0.1 
-                    }}
-                    className="chat-message-enter"
-                  >
-                    <ChatMessage message={message} index={index} />
-                  </motion.div>
-                ))}
-              </AnimatePresence>
-
-              {/* Loading Indicator */}
-              {isLoading && (
-                <motion.div
-                  initial={{ opacity: 0, y: 20 }}
-                  animate={{ opacity: 1, y: 0 }}
-                  className="flex justify-start"
-                >
-                  <div className="bg-muted/50 backdrop-blur-sm rounded-2xl p-4 max-w-xs">
-                    <LoadingDots />
+                  {/* Trending Topics Grid */}
+                  <div className="max-w-3xl mx-auto">
+                    <h2 className="text-xl font-semibold mb-6 flex items-center justify-center gap-2">
+                      <Sparkles className="h-5 w-5 text-primary" />
+                      Trending Topics in Indonesia
+                    </h2>
+                    
+                    {loadingTrending ? (
+                      <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                        {[...Array(6)].map((_, i) => (
+                          <div key={i} className="h-20 bg-muted/50 rounded-xl animate-pulse" />
+                        ))}
+                      </div>
+                    ) : (
+                      <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                        {trendingPrompts.slice(0, 6).map((prompt, index) => (
+                          <motion.button
+                            key={index}
+                            initial={{ opacity: 0, y: 20 }}
+                            animate={{ opacity: 1, y: 0 }}
+                            transition={{ delay: index * 0.1 }}
+                            whileHover={{ scale: 1.02, y: -2 }}
+                            whileTap={{ scale: 0.98 }}
+                            onClick={() => handleSuggestionClick(prompt)}
+                            className="p-4 text-left rounded-xl bg-gradient-to-br from-muted/50 to-muted/30 hover:from-primary/5 hover:to-primary/10 border border-border hover:border-primary/30 transition-all group"
+                          >
+                            <div className="flex items-start gap-3">
+                              <div className="w-2 h-2 bg-primary rounded-full mt-2 group-hover:scale-125 transition-transform" />
+                              <p className="text-sm leading-relaxed group-hover:text-foreground transition-colors">
+                                {prompt}
+                              </p>
+                            </div>
+                          </motion.button>
+                        ))}
+                      </div>
+                    )}
                   </div>
                 </motion.div>
               )}
@@ -776,141 +813,186 @@ export function ChatBot() {
               {/* Error Display */}
               {error && (
                 <motion.div
-                  initial={{ opacity: 0, y: 20 }}
-                  animate={{ opacity: 1, y: 0 }}
-                  className="bg-destructive/10 border border-destructive/20 rounded-xl p-4 flex items-start gap-3"
+                  initial={{ opacity: 0, scale: 0.95 }}
+                  animate={{ opacity: 1, scale: 1 }}
+                  className="max-w-2xl mx-auto"
                 >
-                  <AlertCircle className="h-5 w-5 text-destructive flex-shrink-0 mt-0.5" />
-                  <div className="flex-1">
-                    <p className="text-sm font-medium text-destructive">Error</p>
-                    <p className="text-sm text-destructive/80 mt-1">{error}</p>
-                    <Button
-                      variant="outline"
-                      size="sm"
-                      onClick={clearError}
-                      className="mt-2 border-destructive/20 hover:bg-destructive/10"
-                    >
-                      Dismiss
-                    </Button>
+                  <div className="bg-destructive/10 border border-destructive/20 rounded-xl p-4 flex items-start gap-3">
+                    <AlertCircle className="h-5 w-5 text-destructive mt-0.5 flex-shrink-0" />
+                    <div className="flex-1">
+                      <p className="text-sm text-destructive font-medium mb-2">Something went wrong</p>
+                      <p className="text-sm text-destructive/80">{error}</p>
+                      <Button
+                        variant="ghost"
+                        size="sm"
+                        onClick={clearError}
+                        className="mt-3 h-8 px-3 text-destructive hover:bg-destructive/10"
+                      >
+                        Dismiss
+                      </Button>
+                    </div>
                   </div>
                 </motion.div>
               )}
+
+              {/* Messages */}
+              <div className="space-y-6">
+                {messages.map((message, index) => (
+                  <motion.div
+                    key={message.id}
+                    initial={{ opacity: 0, y: 20 }}
+                    animate={{ opacity: 1, y: 0 }}
+                    transition={{ delay: index * 0.1 }}
+                  >
+                    <ChatMessage message={message} index={index} />
+                  </motion.div>
+                ))}
+
+                {/* NEW: Continue Button */}
+                {canContinue && !isLoading && (
+                  <motion.div
+                    initial={{ opacity: 0, y: 10 }}
+                    animate={{ opacity: 1, y: 0 }}
+                    className="flex justify-center"
+                  >
+                    <ContinueButton
+                      onContinue={handleContinue}
+                      isLoading={false}
+                      disabled={false}
+                    />
+                  </motion.div>
+                )}
+
+                {/* Loading Indicator */}
+                {isLoading && (
+                  <motion.div
+                    initial={{ opacity: 0, y: 10 }}
+                    animate={{ opacity: 1, y: 0 }}
+                    className="flex items-center justify-center py-8"
+                  >
+                    <div className="flex items-center gap-4 p-4 rounded-xl bg-muted/50 border border-border">
+                      <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-gradient-to-r from-emerald-500 to-blue-500">
+                        <Logo className="h-4 w-4 text-white" />
+                      </div>
+                      <div className="flex items-center gap-3">
+                        <LoadingDots />
+                        <span className="text-sm text-muted-foreground font-medium">
+                          AI is thinking...
+                        </span>
+                      </div>
+                    </div>
+                  </motion.div>
+                )}
+              </div>
             </div>
           </ScrollArea>
 
           {/* Input Area */}
-          <div className="border-t border-border bg-card/50 backdrop-blur-xl p-4">
-            <div className="max-w-4xl mx-auto">
-              {/* File Attachments */}
-              {selectedFiles.length > 0 && (
-                <div className="mb-4 flex flex-wrap gap-2">
-                  {selectedFiles.map((file, index) => (
-                    <motion.div
-                      key={index}
-                      initial={{ opacity: 0, scale: 0.8 }}
-                      animate={{ opacity: 1, scale: 1 }}
-                      className="flex items-center gap-2 bg-muted/50 rounded-lg px-3 py-2 text-sm"
-                    >
-                      {file.type.startsWith('image/') ? (
-                        <Image className="h-4 w-4 text-blue-500" />
-                      ) : (
-                        <FileText className="h-4 w-4 text-green-500" />
-                      )}
-                      <span className="max-w-32 truncate">{file.name}</span>
-                      <Button
-                        variant="ghost"
-                        size="sm"
-                        onClick={() => removeFile(index)}
-                        className="h-auto p-1 hover:bg-destructive/10 hover:text-destructive"
-                      >
-                        <X className="h-3 w-3" />
-                      </Button>
-                    </motion.div>
-                  ))}
-                </div>
-              )}
-
+          <div className="border-t border-border bg-card/95 backdrop-blur-xl">
+            <div className="max-w-4xl mx-auto p-4">
               {/* Code Mode Indicator */}
               {isCodeMode && (
-                <div className="mb-2 flex items-center gap-2 text-sm text-muted-foreground">
+                <motion.div
+                  initial={{ opacity: 0, y: -10 }}
+                  animate={{ opacity: 1, y: 0 }}
+                  className="mb-3 flex items-center gap-2 text-sm bg-primary/10 text-primary px-3 py-2 rounded-lg border border-primary/20"
+                >
                   <Code className="h-4 w-4" />
-                  <span>Code mode enabled</span>
+                  <span className="font-medium">Code Mode Active</span>
                   <Button
                     variant="ghost"
                     size="sm"
                     onClick={() => setIsCodeMode(false)}
-                    className="h-auto p-1"
+                    className="h-5 w-5 p-0 hover:bg-primary/20 ml-auto"
                   >
                     <X className="h-3 w-3" />
                   </Button>
-                </div>
+                </motion.div>
               )}
 
-              {/* Input Form */}
+              {/* Selected Files */}
+              {selectedFiles.length > 0 && (
+                <motion.div
+                  initial={{ opacity: 0, y: -10 }}
+                  animate={{ opacity: 1, y: 0 }}
+                  className="mb-3 flex flex-wrap gap-2"
+                >
+                  {selectedFiles.map((file, index) => (
+                    <div
+                      key={index}
+                      className="flex items-center gap-2 bg-muted px-3 py-1 rounded-full text-sm border border-border"
+                    >
+                      <FileText className="h-3 w-3 text-muted-foreground" />
+                      <span className="truncate max-w-32 font-medium">{file.name}</span>
+                      <Button
+                        variant="ghost"
+                        size="sm"
+                        onClick={() => removeFile(index)}
+                        className="h-4 w-4 p-0 hover:bg-destructive/10 hover:text-destructive"
+                      >
+                        <X className="h-2 w-2" />
+                      </Button>
+                    </div>
+                  ))}
+                </motion.div>
+              )}
+
+              {/* Main Input Form */}
               <form onSubmit={handleSubmit} className="relative">
-                <div className="flex items-end gap-2">
+                <div className="flex items-end gap-3">
+                  {/* File Upload Button */}
+                  <Button
+                    type="button"
+                    variant="ghost"
+                    size="sm"
+                    onClick={() => fileInputRef.current?.click()}
+                    disabled={isLoading}
+                    className="h-12 w-12 rounded-xl hover:bg-muted shrink-0"
+                    title="Attach file"
+                  >
+                    <Paperclip className="h-4 w-4" />
+                  </Button>
+
+                  {/* Text Input */}
                   <div className="flex-1 relative">
-                    <Input
-                      ref={inputRef}
-                      value={input}
-                      onChange={(e) => setInput(e.target.value)}
-                      placeholder={
-                        !isAuthenticated && remainingQuota <= 0
-                          ? "Sign in to continue chatting..."
-                          : isCodeMode
-                          ? "Describe your coding task..."
-                          : "Type your message..."
-                      }
-                      disabled={isLoading || (!isAuthenticated && remainingQuota <= 0)}
-                      className="min-h-[52px] resize-none pr-12 chat-input rounded-xl border-2 focus:border-primary transition-all duration-300"
-                      onKeyDown={(e) => {
-                        if (e.key === 'Enter' && !e.shiftKey) {
-                          e.preventDefault();
-                          handleSubmit(e);
+                    <div className="relative">
+                      <Input
+                        ref={inputRef}
+                        value={input}
+                        onChange={(e) => setInput(e.target.value)}
+                        placeholder={
+                          !isAuthenticated && remainingQuota <= 0
+                            ? 'Sign in to continue chatting...'
+                            : isCodeMode
+                            ? 'Describe the code you want to create...'
+                            : 'Type your message...'
                         }
-                      }}
-                    />
-                    
-                    {/* File Upload Button */}
-                    <Button
-                      type="button"
-                      variant="ghost"
-                      size="sm"
-                      onClick={() => fileInputRef.current?.click()}
-                      disabled={isLoading}
-                      className="absolute right-2 top-1/2 transform -translate-y-1/2 hover:bg-muted"
-                    >
-                      <Upload className="h-4 w-4" />
-                    </Button>
-                  </div>
-
-                  {/* Action Buttons */}
-                  <div className="flex gap-2">
-                    {/* Code Mode Toggle */}
-                    <Button
-                      type="button"
-                      variant={isCodeMode ? "default" : "outline"}
-                      size="sm"
-                      onClick={() => setIsCodeMode(!isCodeMode)}
-                      disabled={isLoading}
-                      className={isCodeMode ? "bg-primary text-primary-foreground" : ""}
-                    >
-                      <Code className="h-4 w-4" />
-                    </Button>
-
-                    {/* Send Button */}
-                    <Button
-                      type="submit"
-                      disabled={!input.trim() || isLoading || (!isAuthenticated && remainingQuota <= 0)}
-                      className="bg-gradient-to-r from-emerald-500 to-blue-500 hover:from-emerald-600 hover:to-blue-600 text-white px-6 shadow-lg hover:shadow-xl transition-all duration-300"
-                    >
-                      {isLoading ? (
-                        <RotateCcw className="h-4 w-4 animate-spin" />
-                      ) : (
-                        <Send className="h-4 w-4" />
+                        disabled={isLoading || (!isAuthenticated && remainingQuota <= 0)}
+                        className="min-h-12 py-3 pr-12 resize-none border-border bg-muted/30 focus:bg-background rounded-xl"
+                        maxLength={4000}
+                      />
+                      
+                      {/* Character Counter */}
+                      {input.length > 3500 && (
+                        <div className="absolute -top-6 right-0 text-xs text-muted-foreground font-mono">
+                          {input.length}/4000
+                        </div>
                       )}
-                    </Button>
+                    </div>
                   </div>
+
+                  {/* Send Button */}
+                  <Button
+                    type="submit"
+                    disabled={!input.trim() || isLoading || (!isAuthenticated && remainingQuota <= 0)}
+                    className="h-12 w-12 rounded-xl bg-gradient-to-r from-emerald-500 to-blue-500 hover:from-emerald-600 hover:to-blue-600 text-white shrink-0 shadow-lg hover:shadow-xl transition-all"
+                  >
+                    {isLoading ? (
+                      <RotateCcw className="h-4 w-4 animate-spin" />
+                    ) : (
+                      <Send className="h-4 w-4" />
+                    )}
+                  </Button>
                 </div>
 
                 {/* Hidden File Input */}
@@ -923,6 +1005,27 @@ export function ChatBot() {
                   className="hidden"
                 />
               </form>
+
+              {/* Usage Warning */}
+              {!isAuthenticated && remainingQuota <= 3 && remainingQuota > 0 && (
+                <motion.div
+                  initial={{ opacity: 0, y: 10 }}
+                  animate={{ opacity: 1, y: 0 }}
+                  className="mt-3 text-center"
+                >
+                  <p className="text-xs text-amber-600 dark:text-amber-400">
+                    ⚠️ {remainingQuota} free messages remaining today. 
+                    <Button
+                      variant="link"
+                      size="sm"
+                      onClick={() => setLoginOpen(true)}
+                      className="p-0 h-auto text-xs underline ml-1 text-amber-600 dark:text-amber-400"
+                    >
+                      Sign in for more
+                    </Button>
+                  </p>
+                </motion.div>
+              )}
 
               {/* Footer Text */}
               <div className="mt-3 text-center">
