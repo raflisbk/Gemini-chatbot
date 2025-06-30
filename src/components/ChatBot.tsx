@@ -990,15 +990,14 @@ const handleFilesSelected = useCallback((files: File[]) => {
               )}
 
               {/* File upload area */}
-              {!isGuest && (
-                <FileUpload
-                  onFilesSelected={handleFilesSelected}  // Now expects File[]
+{!isGuest && (
+  <FileUpload
+                  onFilesSelected={handleFilesSelected} // Now expects File[]
                   className="mb-0"
-                  multiple={true}
-                  maxFiles={5}
-                  disabled={isLoading}
-/>
-              )}
+                  maxFiles={5} selectedFiles={[]} onRemoveFile={function (index: number): void {
+                    throw new Error('Function not implemented.');
+                  } }  />
+)}
 
               {/* Code mode indicator */}
               <AnimatePresence>

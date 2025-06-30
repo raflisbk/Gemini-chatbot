@@ -11,8 +11,8 @@ import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { ScrollArea } from '@/components/ui/scroll-area';
 import { useAuth } from '@/context/AuthContext';
-// Import UserManager from its actual module, update the path as needed:
-import { UserManager } from '@/utils/UserManager';
+import { UserManager } from '../utils/UserManager';
+
 
 interface SettingsDialogProps {
   isOpen: boolean;

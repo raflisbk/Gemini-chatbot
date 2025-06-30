@@ -1,3 +1,4 @@
+// src/context/AuthContext.tsx - Fixed ModelSettings Interface
 'use client';
 
 import React, { createContext, useContext, useState, useEffect, useCallback } from 'react';
@@ -5,17 +6,19 @@ import { loginUser, registerUser, logoutUser, AuthUser, RegisterData } from '@/l
 import { getUserUsage, trackUsage } from '@/lib/supabase';
 import { supabase } from '@/lib/supabase';
 
-// Keep existing interfaces for backward compatibility
+// FIXED: Updated ModelSettings interface to match SettingsDialog usage
 export interface ModelSettings {
   model: string;
   temperature: number;
   maxTokens: number;
+  topP: number;          // Added missing property
+  topK: number;          // Added missing property
   systemPrompt: string;
   useStreaming: boolean;
 }
 
 export interface ChatSettings {
-  autoScroll: any;
+  autoScroll: boolean;   // Fixed: changed from 'any' to 'boolean'
   showTimestamps: boolean;
   compactMode: boolean;
   autoSave: boolean;
@@ -56,7 +59,7 @@ interface AuthContextType extends AuthState {
   isAdmin: boolean;
   isGuest: boolean;
   
-  // Settings management (keep existing functionality)
+  // Settings management
   modelSettings: ModelSettings;
   chatSettings: ChatSettings;
   appearanceSettings: AppearanceSettings;
@@ -68,17 +71,19 @@ interface AuthContextType extends AuthState {
   importSettings: (settingsJson: string) => boolean;
 }
 
-// Default settings (keep existing)
+// FIXED: Updated default settings to include missing properties
 const defaultModelSettings: ModelSettings = {
   model: 'gemini-1.5-flash',
   temperature: 0.7,
   maxTokens: 8192,
-  systemPrompt: 'You are a helpful AI assistant.',
+  topP: 0.95,               // Added missing default
+  topK: 40,                 // Added missing default
+  systemPrompt: 'You are a helpful AI assistant focused on Indonesian topics and trending discussions. Always respond in a friendly and informative manner.',
   useStreaming: true,
 };
 
 const defaultChatSettings: ChatSettings = {
-  autoScroll: true,
+  autoScroll: true,         // Fixed: set proper boolean value
   showTimestamps: true,
   compactMode: false,
   autoSave: true,
@@ -96,7 +101,7 @@ const defaultAppearanceSettings: AppearanceSettings = {
   animations: true,
 };
 
-// Storage keys for settings (keep existing for localStorage fallback)
+// Storage keys for settings
 const MODEL_SETTINGS_KEY = 'ai-chatbot-model-settings';
 const CHAT_SETTINGS_KEY = 'ai-chatbot-chat-settings';
 const APPEARANCE_SETTINGS_KEY = 'ai-chatbot-appearance-settings';
@@ -122,7 +127,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     storageUsage: 0,
   });
 
-  // Settings state (keep existing)
+  // Settings state
   const [modelSettings, setModelSettings] = useState<ModelSettings>(defaultModelSettings);
   const [chatSettings, setChatSettings] = useState<ChatSettings>(defaultChatSettings);
   const [appearanceSettings, setAppearanceSettings] = useState<AppearanceSettings>(defaultAppearanceSettings);
@@ -130,33 +135,46 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   const isAdmin = authState.user?.role === 'admin';
   const isGuest = !authState.isAuthenticated;
 
-  // Load settings from localStorage (keep existing functionality)
+  // Load settings from localStorage
   const loadSettings = useCallback(() => {
     try {
       const stored = localStorage.getItem(MODEL_SETTINGS_KEY);
       if (stored) {
-        setModelSettings({ ...defaultModelSettings, ...JSON.parse(stored) });
+        const parsedSettings = JSON.parse(stored);
+        // Ensure all required properties exist with fallbacks
+        setModelSettings({ 
+          ...defaultModelSettings, 
+          ...parsedSettings,
+          // Ensure new properties have defaults if missing from stored data
+          topP: parsedSettings.topP ?? defaultModelSettings.topP,
+          topK: parsedSettings.topK ?? defaultModelSettings.topK,
+        });
       }
     } catch (error) {
       console.error('Failed to load model settings:', error);
+      setModelSettings(defaultModelSettings);
     }
 
     try {
       const stored = localStorage.getItem(CHAT_SETTINGS_KEY);
       if (stored) {
-        setChatSettings({ ...defaultChatSettings, ...JSON.parse(stored) });
+        const parsedSettings = JSON.parse(stored);
+        setChatSettings({ ...defaultChatSettings, ...parsedSettings });
       }
     } catch (error) {
       console.error('Failed to load chat settings:', error);
+      setChatSettings(defaultChatSettings);
     }
 
     try {
       const stored = localStorage.getItem(APPEARANCE_SETTINGS_KEY);
       if (stored) {
-        setAppearanceSettings({ ...defaultAppearanceSettings, ...JSON.parse(stored) });
+        const parsedSettings = JSON.parse(stored);
+        setAppearanceSettings({ ...defaultAppearanceSettings, ...parsedSettings });
       }
     } catch (error) {
       console.error('Failed to load appearance settings:', error);
+      setAppearanceSettings(defaultAppearanceSettings);
     }
   }, []);
 
@@ -220,7 +238,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
           messageCount: usageData.messageCount,
           fileUploads: usageData.fileUploads,
           remainingQuota: Math.max(0, maxQuota - usageData.messageCount),
-          storageUsage: 0, // Will be updated by storage hook
+          storageUsage: 0,
         });
       } else {
         // Guest usage from localStorage
@@ -291,7 +309,6 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     try {
       const token = localStorage.getItem('auth_token');
       if (token) {
-        // Call logout API to invalidate session
         await fetch('/api/auth/logout', {
           method: 'POST',
           headers: {
@@ -307,7 +324,6 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         isLoading: false,
       });
       
-      // Reset to guest quota
       setUsage({
         messageCount: 0,
         fileUploads: 0,
@@ -326,7 +342,6 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         await trackUsage(authState.user.id, type);
         await refreshUsage();
       } else {
-        // Guest usage tracking
         const today = new Date().toDateString();
         const storageKey = `guest_usage_${today}`;
         const stored = localStorage.getItem(storageKey);
@@ -346,7 +361,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     }
   };
 
-  // Settings management functions (keep existing)
+  // Settings management functions
   const updateModelSettings = (newSettings: Partial<ModelSettings>) => {
     const updated = { ...modelSettings, ...newSettings };
     setModelSettings(updated);
