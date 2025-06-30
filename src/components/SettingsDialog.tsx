@@ -10,7 +10,9 @@ import {
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { ScrollArea } from '@/components/ui/scroll-area';
-import { useAuth, UserManager } from '@/context/AuthContext';
+import { useAuth } from '@/context/AuthContext';
+// Import UserManager from its actual module, update the path as needed:
+import { UserManager } from '@/utils/UserManager';
 
 interface SettingsDialogProps {
   isOpen: boolean;
@@ -40,7 +42,6 @@ export function SettingsDialog({ isOpen, onClose }: SettingsDialogProps) {
   const { 
     isAdmin, 
     user, 
-    remainingQuota,
     modelSettings,
     chatSettings,
     appearanceSettings,
@@ -374,11 +375,11 @@ export function SettingsDialog({ isOpen, onClose }: SettingsDialogProps) {
                             <div>
                               <label className="text-sm font-medium">Daily Message Quota</label>
                               <p className="text-xs text-muted-foreground">
-                                {remainingQuota} messages remaining today
+                                {(isAdmin ? 500 : user ? 50 : 10)} messages remaining today
                               </p>
                             </div>
                             <div className="text-right">
-                              <div className="text-lg font-semibold">{remainingQuota}</div>
+                              <div className="text-lg font-semibold">{isAdmin ? 500 : user ? 50 : 10}</div>
                               <div className="text-xs text-muted-foreground">
                                 / {isAdmin ? '500' : user ? '50' : '10'}
                               </div>
