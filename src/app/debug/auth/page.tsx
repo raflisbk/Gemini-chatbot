@@ -17,7 +17,7 @@ export default function AuthDebugPage() {
     const timestamp = new Date().toISOString();
     console.log(`🔍 [${timestamp}] ${event}`, data);
     
-    setDebugInfo(prev => ({
+    setDebugInfo((prev: typeof debugInfo) => ({
       ...prev,
       timeline: [...prev.timeline, {
         timestamp,
@@ -36,31 +36,31 @@ export default function AuthDebugPage() {
         isLoading: authState.isLoading,
         isAuthenticated: authState.isAuthenticated,
         user: authState.user ? 'Present' : 'Null',
-        error: authState.error,
+        // error: authState.error, // Removed: 'error' does not exist on AuthContextType
         isGuest: authState.isGuest
       });
 
-      setDebugInfo(prev => ({
+      setDebugInfo((prev: typeof debugInfo) => ({
         ...prev,
         status: 'monitoring',
         currentState: {
           isLoading: authState.isLoading,
           isAuthenticated: authState.isAuthenticated,
           hasUser: !!authState.user,
-          error: authState.error,
+          // error: authState.error, // Removed: 'error' does not exist on AuthContextType
           isGuest: authState.isGuest,
           isAdmin: authState.isAdmin
         }
       }));
     } else {
       addToTimeline('AuthState is null/undefined');
-      setDebugInfo(prev => ({
+      setDebugInfo((prev: typeof debugInfo) => ({
         ...prev,
         status: 'error',
-        error: 'AuthState is null'
+        // error: 'AuthState is null' // Removed: 'error' property not used
       }));
     }
-  }, [authState?.isLoading, authState?.isAuthenticated, authState?.user, authState?.error]);
+  }, [authState?.isLoading, authState?.isAuthenticated, authState?.user]);
 
   // Test AuthContext functions
   const testAuthFunctions = async () => {
@@ -78,10 +78,10 @@ export default function AuthDebugPage() {
 
       addToTimeline('Function availability test', functionTests);
 
-      // Test if we can call functions (without actually executing)
-      if (authState?.login) {
-        addToTimeline('Login function available');
-      }
+      // Optionally, you can test calling the login function with mock data here if desired
+      // Example:
+      // await authState.login('test@example.com', 'password');
+      addToTimeline('Login function is defined (always true)');
 
     } catch (error: any) {
       addToTimeline('Function test error', { message: error.message });
@@ -130,9 +130,9 @@ export default function AuthDebugPage() {
               <div className="font-medium text-lg">
                 Status: {debugInfo.status.toUpperCase()}
               </div>
-              {debugInfo.error && (
+              {/* {debugInfo.error && (
                 <div className="text-sm mt-2">Error: {debugInfo.error}</div>
-              )}
+              )} */}
             </div>
           </div>
 
@@ -161,12 +161,12 @@ export default function AuthDebugPage() {
                   <div className="text-sm">{String(debugInfo.currentState.isGuest)}</div>
                 </div>
 
-                {debugInfo.currentState.error && (
+                {/* {debugInfo.currentState.error && (
                   <div className="md:col-span-2 p-4 rounded-lg bg-red-50 text-red-800">
                     <div className="font-medium">Error</div>
                     <div className="text-sm">{debugInfo.currentState.error}</div>
                   </div>
-                )}
+                )} */}
               </div>
             </div>
           )}
