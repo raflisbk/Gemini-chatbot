@@ -129,12 +129,10 @@ export class ChatStorage {
           });
         } else {
           // Create new session
-          await createChatSession({
-            id: session.id,
-            user_id: userId,
-            title: session.title,
-            session_data: session.metadata || {}
-          });
+          await createChatSession(
+            userId,
+            session.title
+          );
         }
 
         // Save messages that don't exist yet

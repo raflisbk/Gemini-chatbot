@@ -124,10 +124,10 @@ export async function POST(request: NextRequest): Promise<NextResponse<ChatRespo
     let currentSessionId = sessionId;
     if (user && !currentSessionId) {
       // Create new session for authenticated users
-      const newSession = await createChatSession({
-        user_id: user.id,
-        title: message.substring(0, 100) + (message.length > 100 ? '...' : ''),
-      });
+      const newSession = await createChatSession(
+        user.id,
+        message.substring(0, 100) + (message.length > 100 ? '...' : '')
+      );
       currentSessionId = newSession?.id;
     }
 
