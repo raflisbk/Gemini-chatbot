@@ -1,12 +1,6 @@
-// src/context/AuthContext.tsx - FIXED VERSION
 'use client';
 
 import React, { createContext, useContext, useState, useEffect, useCallback } from 'react';
-import { loginUser, registerUser, logoutUser, AuthUser, RegisterData } from '@/lib/auth';
-import { getUserUsage, trackUsage } from '@/lib/supabase';
-import { supabase } from '@/lib/supabase';
-
-// ✅ IMPORT dari file types yang unified
 import { 
   ModelSettings, 
   ChatSettings, 
@@ -16,10 +10,23 @@ import {
   defaultAppearanceSettings
 } from '@/types/settings';
 
+// ===========================
+// TYPES & INTERFACES
+// ===========================
+
+interface AuthUser {
+  id: string;
+  email: string;
+  name: string;
+  role: 'admin' | 'user';
+  isActive: boolean;
+}
+
 interface AuthState {
   user: AuthUser | null;
   isAuthenticated: boolean;
   isLoading: boolean;
+  error: string | null;
 }
 
 interface UsageInfo {
@@ -27,6 +34,13 @@ interface UsageInfo {
   fileUploads: number;
   remainingQuota: number;
   storageUsage: number;
+}
+
+interface RegisterData {
+  email: string;
+  password: string;
+  name: string;
+  role?: 'admin' | 'user';
 }
 
 interface AuthContextType extends AuthState {
@@ -38,6 +52,7 @@ interface AuthContextType extends AuthState {
   usage: UsageInfo;
   isAdmin: boolean;
   isGuest: boolean;
+  clearError: () => void;
   
   // Settings management
   modelSettings: ModelSettings;
@@ -51,13 +66,24 @@ interface AuthContextType extends AuthState {
   importSettings: (settingsJson: string) => boolean;
 }
 
+// ===========================
+// CONTEXT CREATION
+// ===========================
+
 const AuthContext = createContext<AuthContextType | undefined>(undefined);
 
+// ===========================
+// AUTH PROVIDER - FIXED VERSION
+// ===========================
+
 export function AuthProvider({ children }: { children: React.ReactNode }) {
+  console.log('🔍 AuthProvider initializing...');
+  
   const [authState, setAuthState] = useState<AuthState>({
     user: null,
     isAuthenticated: false,
-    isLoading: true
+    isLoading: true,
+    error: null
   });
 
   const [usage, setUsage] = useState<UsageInfo>({
@@ -67,35 +93,136 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     storageUsage: 0
   });
 
-  // ✅ Settings state menggunakan interface yang sudah diperbaiki
   const [modelSettings, setModelSettings] = useState<ModelSettings>(defaultModelSettings);
   const [chatSettings, setChatSettings] = useState<ChatSettings>(defaultChatSettings);
   const [appearanceSettings, setAppearanceSettings] = useState<AppearanceSettings>(defaultAppearanceSettings);
 
-  // Load settings from localStorage
+  // Track initialization to prevent infinite loops
+  const [hasInitialized, setHasInitialized] = useState(false);
+
+  // ===========================
+  // INITIALIZATION WITH TIMEOUT
+  // ===========================
+
+  useEffect(() => {
+    console.log('🔍 AuthProvider useEffect triggered');
+    
+    if (hasInitialized) {
+      console.log('🔍 Already initialized, skipping...');
+      return;
+    }
+
+    let timeoutId: NodeJS.Timeout;
+    
+    const initializeAuth = async () => {
+      console.log('🔍 Starting auth initialization...');
+      
+      try {
+        // Set timeout to prevent infinite loading
+        timeoutId = setTimeout(() => {
+          console.warn('⚠️ Auth initialization timeout - setting as guest');
+          setAuthState(prev => ({
+            ...prev,
+            isLoading: false,
+            isAuthenticated: false,
+            user: null,
+            error: null
+          }));
+          setHasInitialized(true);
+        }, 5000); // 5 second timeout
+
+        // Check for existing token
+        const token = localStorage.getItem('auth-token');
+        console.log('🔍 Token check:', !!token);
+        
+        if (!token) {
+          console.log('🔍 No token found, setting as guest');
+          clearTimeout(timeoutId);
+          setAuthState(prev => ({
+            ...prev,
+            isLoading: false,
+            isAuthenticated: false,
+            user: null,
+            error: null
+          }));
+          setHasInitialized(true);
+          return;
+        }
+
+        // Verify token with API
+        console.log('🔍 Verifying token...');
+        const response = await fetch('/api/auth/verify', {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            'Authorization': `Bearer ${token}`,
+          },
+        });
+
+        console.log('🔍 Token verification response:', response.status);
+
+        if (response.ok) {
+          const data = await response.json();
+          console.log('🔍 Token verification successful:', !!data.user);
+          
+          if (data.user) {
+            clearTimeout(timeoutId);
+            setAuthState(prev => ({
+              ...prev,
+              isLoading: false,
+              isAuthenticated: true,
+              user: data.user,
+              error: null
+            }));
+            setHasInitialized(true);
+            return;
+          }
+        }
+
+        // Token verification failed
+        console.log('🔍 Token verification failed, removing token');
+        localStorage.removeItem('auth-token');
+        clearTimeout(timeoutId);
+        setAuthState(prev => ({
+          ...prev,
+          isLoading: false,
+          isAuthenticated: false,
+          user: null,
+          error: null
+        }));
+        setHasInitialized(true);
+
+      } catch (error) {
+        console.error('🔍 Auth initialization error:', error);
+        clearTimeout(timeoutId);
+        localStorage.removeItem('auth-token');
+        setAuthState(prev => ({
+          ...prev,
+          isLoading: false,
+          isAuthenticated: false,
+          user: null,
+          error: null
+        }));
+        setHasInitialized(true);
+      }
+    };
+
+    initializeAuth();
+
+    return () => {
+      if (timeoutId) {
+        clearTimeout(timeoutId);
+      }
+    };
+  }, []); // Empty dependency array - only run once
+
+  // ===========================
+  // SETTINGS MANAGEMENT
+  // ===========================
+
   useEffect(() => {
     loadSettings();
   }, []);
-
-  // Apply theme changes immediately
-  useEffect(() => {
-    applyTheme();
-  }, [appearanceSettings.theme]);
-
-  // Apply font size changes
-  useEffect(() => {
-    applyFontSize();
-  }, [appearanceSettings.fontSize]);
-
-  // Apply accent color changes
-  useEffect(() => {
-    applyAccentColor();
-  }, [appearanceSettings.accentColor]);
-
-  // ✅ Apply sidebar position - sekarang tidak akan error
-  useEffect(() => {
-    applySidebarPosition();
-  }, [appearanceSettings.sidebarPosition]);
 
   const loadSettings = () => {
     try {
@@ -117,97 +244,153 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     }
   };
 
-  const saveSettings = () => {
+  // ===========================
+  // AUTH FUNCTIONS
+  // ===========================
+
+  const login = useCallback(async (email: string, password: string): Promise<boolean> => {
+    console.log('🔍 Login attempt for:', email);
+    
     try {
-      localStorage.setItem('ai-chatbot-model-settings', JSON.stringify(modelSettings));
-      localStorage.setItem('ai-chatbot-chat-settings', JSON.stringify(chatSettings));
-      localStorage.setItem('ai-chatbot-appearance-settings', JSON.stringify(appearanceSettings));
-    } catch (error) {
-      console.error('Failed to save settings:', error);
-    }
-  };
+      setAuthState(prev => ({ ...prev, error: null }));
 
-  const applyTheme = () => {
-    if (typeof window === 'undefined') return;
-    
-    const root = window.document.documentElement;
-    const isDark = appearanceSettings.theme === 'dark' || 
-      (appearanceSettings.theme === 'system' && window.matchMedia('(prefers-color-scheme: dark)').matches);
-    
-    root.classList.toggle('dark', isDark);
-  };
+      const response = await fetch('/api/auth/login', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ email, password }),
+      });
 
-  const applyFontSize = () => {
-    if (typeof window === 'undefined') return;
-    
-    const root = window.document.documentElement;
-    
-    switch (appearanceSettings.fontSize) {
-      case 'sm':
-        root.style.fontSize = '14px';
-        break;
-      case 'lg':
-        root.style.fontSize = '18px';
-        break;
-      default:
-        root.style.fontSize = '16px';
-        break;
-    }
-  };
+      const data = await response.json();
 
-  const applyAccentColor = () => {
-    if (typeof window === 'undefined') return;
-    
-    const root = window.document.documentElement;
-    
-    const hex = appearanceSettings.accentColor.replace('#', '');
-    const r = parseInt(hex.substr(0, 2), 16);
-    const g = parseInt(hex.substr(2, 2), 16);
-    const b = parseInt(hex.substr(4, 2), 16);
-    
-    const [h, s, l] = rgbToHsl(r, g, b);
-    
-    root.style.setProperty('--primary', `${h} ${s}% ${l}%`);
-    root.style.setProperty('--ring', `${h} ${s}% ${l}%`);
-  };
-
-  // ✅ Function ini sekarang akan bekerja karena sidebarPosition ada di interface
-  const applySidebarPosition = () => {
-    if (typeof window === 'undefined') return;
-    
-    const root = window.document.documentElement;
-    root.setAttribute('data-sidebar-position', appearanceSettings.sidebarPosition || 'left');
-  };
-
-  // Helper function to convert RGB to HSL
-  const rgbToHsl = (r: number, g: number, b: number): [number, number, number] => {
-    r /= 255;
-    g /= 255;
-    b /= 255;
-    
-    const max = Math.max(r, g, b);
-    const min = Math.min(r, g, b);
-    let h = 0;
-    let s = 0;
-    const l = (max + min) / 2;
-
-    if (max === min) {
-      h = s = 0;
-    } else {
-      const d = max - min;
-      s = l > 0.5 ? d / (2 - max - min) : d / (max + min);
-      switch (max) {
-        case r: h = (g - b) / d + (g < b ? 6 : 0); break;
-        case g: h = (b - r) / d + 2; break;
-        case b: h = (r - g) / d + 4; break;
+      if (response.ok && data.success) {
+        localStorage.setItem('auth-token', data.token);
+        setAuthState(prev => ({
+          ...prev,
+          isAuthenticated: true,
+          user: data.user,
+          error: null
+        }));
+        return true;
+      } else {
+        setAuthState(prev => ({
+          ...prev,
+          error: data.error || 'Login failed'
+        }));
+        return false;
       }
-      h /= 6;
+    } catch (error) {
+      console.error('Login error:', error);
+      setAuthState(prev => ({
+        ...prev,
+        error: 'Network error occurred'
+      }));
+      return false;
     }
+  }, []);
 
-    return [Math.round(h * 360), Math.round(s * 100), Math.round(l * 100)];
-  };
+  const register = useCallback(async (userData: RegisterData): Promise<{ success: boolean; error?: string }> => {
+    try {
+      setAuthState(prev => ({ ...prev, error: null }));
 
-  // ✅ Update functions sekarang akan bekerja dengan interface yang benar
+      const response = await fetch('/api/auth/register', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(userData),
+      });
+
+      const data = await response.json();
+
+      if (response.ok && data.success) {
+        localStorage.setItem('auth-token', data.token);
+        setAuthState(prev => ({
+          ...prev,
+          isAuthenticated: true,
+          user: data.user,
+          error: null
+        }));
+        return { success: true };
+      } else {
+        const errorMessage = data.error || 'Registration failed';
+        setAuthState(prev => ({
+          ...prev,
+          error: errorMessage
+        }));
+        return { success: false, error: errorMessage };
+      }
+    } catch (error) {
+      console.error('Register error:', error);
+      const errorMessage = 'Network error occurred';
+      setAuthState(prev => ({
+        ...prev,
+        error: errorMessage
+      }));
+      return { success: false, error: errorMessage };
+    }
+  }, []);
+
+  const logout = useCallback(async (): Promise<void> => {
+    try {
+      const token = localStorage.getItem('auth-token');
+      
+      if (token) {
+        await fetch('/api/auth/logout', {
+          method: 'POST',
+          headers: {
+            'Authorization': `Bearer ${token}`,
+          },
+        });
+      }
+    } catch (error) {
+      console.error('Logout error:', error);
+    } finally {
+      localStorage.removeItem('auth-token');
+      setAuthState(prev => ({
+        ...prev,
+        isAuthenticated: false,
+        user: null,
+        error: null
+      }));
+    }
+  }, []);
+
+  const clearError = useCallback(() => {
+    setAuthState(prev => ({ ...prev, error: null }));
+  }, []);
+
+  // ===========================
+  // USAGE FUNCTIONS (MOCK)
+  // ===========================
+
+  const updateUsage = useCallback(async (type: 'message' | 'file_upload'): Promise<void> => {
+    try {
+      if (authState.user) {
+        // Mock usage update
+        setUsage(prev => ({
+          ...prev,
+          messageCount: type === 'message' ? prev.messageCount + 1 : prev.messageCount,
+          fileUploads: type === 'file_upload' ? prev.fileUploads + 1 : prev.fileUploads,
+        }));
+      }
+    } catch (error) {
+      console.error('Update usage error:', error);
+    }
+  }, [authState.user]);
+
+  const refreshUsage = useCallback(async (): Promise<void> => {
+    try {
+      if (authState.user) {
+        // Mock refresh
+        console.log('Refreshing usage...');
+      }
+    } catch (error) {
+      console.error('Refresh usage error:', error);
+    }
+  }, [authState.user]);
+
+  // ===========================
+  // SETTINGS FUNCTIONS
+  // ===========================
+
   const updateModelSettings = useCallback((newSettings: Partial<ModelSettings>) => {
     setModelSettings(prev => {
       const updated = { ...prev, ...newSettings };
@@ -267,37 +450,21 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     }
   }, [updateModelSettings, updateChatSettings, updateAppearanceSettings]);
 
-  // Auth functions (existing implementation)
-  const login = async (email: string, password: string): Promise<boolean> => {
-    // Implementation existing
-    return true;
-  };
-
-  const register = async (userData: RegisterData) => {
-    // Implementation existing
-    return { success: true };
-  };
-
-  const logout = async () => {
-    // Implementation existing
-  };
-
-  const updateUsage = async (type: 'message' | 'file_upload') => {
-    // Implementation existing
-  };
-
-  const refreshUsage = async () => {
-    // Implementation existing
-  };
+  // ===========================
+  // CONTEXT VALUE
+  // ===========================
 
   const value: AuthContextType = {
     ...authState,
     usage,
     isAdmin: authState.user?.role === 'admin',
-    isGuest: authState.user?.id === 'guest',
+    isGuest: !authState.isAuthenticated,
+    
+    // Auth functions
     login,
     register,
     logout,
+    clearError,
     updateUsage,
     refreshUsage,
     
@@ -310,8 +477,10 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     updateAppearanceSettings,
     resetSettingsToDefaults,
     exportSettings,
-    importSettings
+    importSettings,
   };
+
+  console.log('🔍 AuthProvider rendering, isLoading:', authState.isLoading);
 
   return (
     <AuthContext.Provider value={value}>
@@ -320,10 +489,16 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   );
 }
 
-export const useAuth = () => {
+// ===========================
+// HOOK
+// ===========================
+
+export function useAuth() {
   const context = useContext(AuthContext);
+  
   if (context === undefined) {
     throw new Error('useAuth must be used within an AuthProvider');
   }
+  
   return context;
-};
+}
