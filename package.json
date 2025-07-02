@@ -10,7 +10,11 @@
     "setup-supabase": "supabase init && supabase start",
     "db:push": "supabase db push",
     "db:reset": "supabase db reset",
-    "generate-types": "supabase gen types typescript --local > src/types/supabase.ts"
+    "generate-types": "supabase gen types typescript --local > src/types/supabase.ts",
+    "verify-setup": "node scripts/verify-setup.js",
+    "cleanup-sessions": "node scripts/cleanup-sessions.js",
+    "cleanup-errors": "node scripts/cleanup-errors.js",
+    "test:security": "node scripts/test-security.js"
   },
   "dependencies": {
     "@google/generative-ai": "^0.19.0",
@@ -23,6 +27,7 @@
     "clsx": "^2.1.1",
     "crypto-js": "^4.2.0",
     "framer-motion": "^11.3.30",
+    "ioredis": "^5.6.1",
     "jose": "^6.0.11",
     "jsonwebtoken": "^9.0.2",
     "lucide-react": "^0.445.0",
@@ -36,6 +41,7 @@
   "devDependencies": {
     "@types/bcryptjs": "^2.4.6",
     "@types/crypto-js": "^4.2.2",
+    "@types/ioredis": "^5.0.0",
     "@types/jsonwebtoken": "^9.0.10",
     "@types/node": "^20",
     "@types/react": "^18",
@@ -47,5 +53,18 @@
     "tailwindcss": "^3.4.1",
     "tailwindcss-animate": "^1.0.7",
     "typescript": "^5"
-  }
+  },
+  "engines": {
+    "node": ">=18.17.0",
+    "npm": ">=9.0.0"
+  },
+  "keywords": [
+    "ai",
+    "chatbot",
+    "gemini",
+    "nextjs",
+    "typescript",
+    "supabase",
+    "redis"
+  ]
 }
