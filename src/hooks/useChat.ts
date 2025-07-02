@@ -1,423 +1,385 @@
-import { useState, useCallback, useRef } from 'react';
-import { Message, ChatState } from '@/lib/types';
+// src/hooks/useChat.ts - Enhanced Version
+import { useState, useCallback, useRef, useEffect } from 'react';
 import { generateId } from '@/lib/utils';
 
-interface FileAttachment {
-  file: File;
-  type: 'image' | 'document' | 'audio' | 'video' | 'other';
+// Types
+export interface Message {
+  id: string;
+  content: string;
+  role: 'user' | 'assistant';
+  timestamp: Date;
+  attachments?: FileAttachment[];
+  metadata?: {
+    model?: string;
+    temperature?: number;
+    processingTime?: number;
+    tokenCount?: number;
+    isComplete?: boolean;
+  };
+}
+
+export interface FileAttachment {
+  id: string;
+  name: string;
+  type: string;
+  size: number;
+  url?: string;
+  mimeType?: string;
   base64?: string;
-  mimeType: string;
 }
 
-interface ChatResponse {
-  success: boolean;
-  message?: string;
-  isIncomplete?: boolean;  // NEW: Add this to interface
-  error?: string;
-  remainingTokens?: number;
+export interface ChatState {
+  messages: Message[];
+  isLoading: boolean;
+  isTyping: boolean;
+  error: string | null;
+  canContinue: boolean;
+  currentSessionId: string | null;
 }
 
-export function useChat() {
+export interface SendMessageOptions {
+  files?: File[];
+  continueFrom?: string;
+  sessionId?: string;
+  settings?: {
+    model?: string;
+    temperature?: number;
+    maxTokens?: number;
+    systemPrompt?: string;
+  };
+}
+
+export interface UseChatOptions {
+  onError?: (error: string) => void;
+  onSuccess?: (response: string) => void;
+  onTypingChange?: (isTyping: boolean) => void;
+  maxRetries?: number;
+  retryDelay?: number;
+}
+
+export function useChat(options: UseChatOptions = {}) {
+  const {
+    onError,
+    onSuccess,
+    onTypingChange,
+    maxRetries = 3,
+    retryDelay = 1000
+  } = options;
+
+  // Core state
   const [chatState, setChatState] = useState<ChatState>({
     messages: [],
     isLoading: false,
+    isTyping: false,
     error: null,
+    canContinue: false,
+    currentSessionId: null
   });
+
+  // Retry state
+  const [retryCount, setRetryCount] = useState(0);
   
-  // NEW: Add continue states
-  const [canContinue, setCanContinue] = useState(false);
-  const [lastIncompleteMessage, setLastIncompleteMessage] = useState<string | null>(null);
-  const [incompleteMessageId, setIncompleteMessageId] = useState<string | null>(null);
-  
+  // Conversation memory for context
   const conversationMemory = useRef<Message[]>([]);
+  const abortControllerRef = useRef<AbortController | null>(null);
 
-  // NEW: Function to detect incomplete responses
-  const detectIncompleteResponse = useCallback((response: string): boolean => {
-    if (!response || typeof response !== 'string') return false;
-    
-    const text = response.trim();
-    
-    // Check for common indicators of incomplete responses
-    const incompleteIndicators = [
-      /[^.!?]\s*$/, // Response cuts off mid-sentence
-      /```[^`]*$/, // Unfinished code blocks
-      /^\d+\.\s+[^.!?]*$/m, // Incomplete numbered lists
-      /^[-*]\s+[^.!?]*$/m, // Incomplete bullet points
-    ];
+  // Update typing state callback
+  useEffect(() => {
+    onTypingChange?.(chatState.isTyping);
+  }, [chatState.isTyping, onTypingChange]);
 
-    // Very long responses are more likely to be cut off
-    const isVeryLong = text.length > 3000;
-    
-    // Check for incomplete indicators
-    const hasIncompleteIndicators = incompleteIndicators.some(pattern => pattern.test(text));
-    
-    // Additional heuristics
-    const endsAbruptly = !text.match(/[.!?]$/);
-    const hasUnfinishedCode = text.includes('```') && (text.match(/```/g) || []).length % 2 !== 0;
-    
-    return isVeryLong && (hasIncompleteIndicators || endsAbruptly || hasUnfinishedCode);
-  }, []);
-
-  // Validate and process file attachments
+  // File processing utility
   const processFileAttachments = useCallback(async (files: File[]): Promise<FileAttachment[]> => {
     const attachments: FileAttachment[] = [];
-    
+
     for (const file of files) {
-      const attachment: FileAttachment = {
-        file,
-        type: getFileType(file),
-        mimeType: file.type || 'application/octet-stream'
-      };
-
-      // Convert to base64 for images and supported formats
-      if (attachment.type === 'image' || isTextFile(file) || isAudioFile(file)) {
-        try {
-          attachment.base64 = await fileToBase64(file);
-        } catch (error) {
-          console.error('Error converting file to base64:', error);
+      try {
+        // Validate file
+        if (file.size > 50 * 1024 * 1024) { // 50MB limit
+          throw new Error(`File ${file.name} is too large (max 50MB)`);
         }
-      }
 
-      attachments.push(attachment);
+        // Convert to base64 for API
+        const base64 = await new Promise<string>((resolve, reject) => {
+          const reader = new FileReader();
+          reader.onload = () => {
+            const result = reader.result as string;
+            const base64 = result.split(',')[1];
+            resolve(base64);
+          };
+          reader.onerror = reject;
+          reader.readAsDataURL(file);
+        });
+
+        attachments.push({
+          id: generateId(),
+          name: file.name,
+          type: file.type,
+          size: file.size,
+          mimeType: file.type,
+          base64,
+          url: URL.createObjectURL(file) // For client-side preview
+        });
+      } catch (error) {
+        console.error(`Error processing file ${file.name}:`, error);
+        throw error;
+      }
     }
-    
+
     return attachments;
   }, []);
 
-  // Get file type based on MIME type
-  const getFileType = (file: File): FileAttachment['type'] => {
-    const mimeType = file.type.toLowerCase();
-    
-    if (mimeType.startsWith('image/')) {
-      if (['image/jpeg', 'image/jpg', 'image/png', 'image/gif', 'image/webp', 'image/bmp', 'image/svg+xml'].includes(mimeType)) {
-        return 'image';
-      }
-    }
-    
-    if (mimeType.startsWith('audio/')) {
-      if (['audio/mpeg', 'audio/mp3', 'audio/wav', 'audio/ogg', 'audio/m4a', 'audio/aac'].includes(mimeType)) {
-        return 'audio';
-      }
-    }
-    
-    if (mimeType.startsWith('video/')) {
-      if (['video/mp4', 'video/avi', 'video/mov', 'video/webm', 'video/mkv'].includes(mimeType)) {
-        return 'video';
-      }
-    }
-    
-    const documentTypes = [
-      'application/pdf', 'application/msword',
-      'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
-      'application/vnd.ms-excel', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
-      'application/vnd.ms-powerpoint', 'application/vnd.openxmlformats-officedocument.presentationml.presentation',
-      'text/plain', 'text/csv', 'application/json', 'text/markdown', 'text/html', 'text/xml', 'application/rtf'
-    ];
-    
-    if (documentTypes.includes(mimeType)) {
-      return 'document';
-    }
-    
-    return 'other';
-  };
-
-  const isTextFile = (file: File): boolean => {
-    const textTypes = ['text/plain', 'text/csv', 'application/json', 'text/markdown', 'text/html', 'text/xml'];
-    return textTypes.includes(file.type.toLowerCase());
-  };
-
-  const isAudioFile = (file: File): boolean => {
-    return file.type.toLowerCase().startsWith('audio/');
-  };
-
-  // Convert file to base64
-  const fileToBase64 = (file: File): Promise<string> => {
-    return new Promise((resolve, reject) => {
-      const reader = new FileReader();
-      reader.readAsDataURL(file);
-      reader.onload = () => {
-        const result = reader.result as string;
-        const base64 = result.split(',')[1];
-        resolve(base64);
-      };
-      reader.onerror = error => reject(error);
-    });
-  };
-
   // Build conversation context for API
   const buildConversationContext = useCallback(() => {
-    const contextMessages = conversationMemory.current.slice(-10);
+    const contextMessages = conversationMemory.current.slice(-10); // Last 10 messages
     return contextMessages.map(msg => ({
       role: msg.role,
       content: msg.content,
-      timestamp: msg.timestamp
+      timestamp: msg.timestamp.toISOString()
     }));
   }, []);
 
-  // Validate message structure
-  const validateMessage = (message: any): message is Message => {
-    return (
-      message &&
-      typeof message === 'object' &&
-      typeof message.id === 'string' &&
-      typeof message.content === 'string' &&
-      (message.role === 'user' || message.role === 'assistant') &&
-      (message.timestamp instanceof Date || typeof message.timestamp === 'string')
-    );
-  };
-
-  // MODIFIED: Enhanced sendMessage with continue detection
-  const sendMessage = useCallback(async (content: string, files?: File[]) => {
-    if (!content.trim() && (!files || files.length === 0)) return;
-
-    let attachments: FileAttachment[] = [];
-    
-    if (files && files.length > 0) {
-      try {
-        attachments = await processFileAttachments(files);
-      } catch (error) {
-        console.error('Error processing file attachments:', error);
-        setChatState(prev => ({
-          ...prev,
-          error: 'Failed to process file attachments'
-        }));
-        return;
-      }
+  // Enhanced send message function
+  const sendMessage = useCallback(async (
+    content: string, 
+    options: SendMessageOptions = {}
+  ): Promise<void> => {
+    if (!content.trim() && (!options.files || options.files.length === 0)) {
+      throw new Error('Message content or files required');
     }
 
-    // Add user message
-    const userMessage: Message = {
-      id: generateId(),
-      content: content.trim(),
-      role: 'user',
-      timestamp: new Date()
-    };
+    // Cancel any ongoing request
+    if (abortControllerRef.current) {
+      abortControllerRef.current.abort();
+    }
 
-    conversationMemory.current.push(userMessage);
+    abortControllerRef.current = new AbortController();
 
     setChatState(prev => ({
       ...prev,
-      messages: [...prev.messages, userMessage],
       isLoading: true,
-      error: null,
+      isTyping: true,
+      error: null
     }));
 
-    // Reset continue state
-    setCanContinue(false);
-    setLastIncompleteMessage(null);
-    setIncompleteMessageId(null);
+    setRetryCount(0);
 
     try {
+      // Process file attachments
+      let attachments: FileAttachment[] = [];
+      if (options.files && options.files.length > 0) {
+        attachments = await processFileAttachments(options.files);
+      }
+
+      // Create user message
+      const userMessage: Message = {
+        id: generateId(),
+        content: content.trim(),
+        role: 'user',
+        timestamp: new Date(),
+        attachments: attachments.length > 0 ? attachments : undefined
+      };
+
+      // Add to conversation memory and state
+      conversationMemory.current.push(userMessage);
+      setChatState(prev => ({
+        ...prev,
+        messages: [...prev.messages, userMessage]
+      }));
+
+      // Prepare API payload with better structure
       const payload = {
         message: content.trim(),
+        sessionId: options.sessionId || chatState.currentSessionId,
         attachments: attachments.map(att => ({
+          id: att.id,
+          name: att.name,
           type: att.type,
           mimeType: att.mimeType,
-          fileName: att.file.name,
-          fileSize: att.file.size,
+          size: att.size,
           base64: att.base64
         })),
         conversationContext: buildConversationContext(),
-        continueFrom: null
+        continueFrom: options.continueFrom,
+        settings: {
+          model: 'gemini-1.5-flash',
+          temperature: 0.7,
+          maxTokens: 4096,
+          ...options.settings
+        }
       };
 
+      // Get auth token
+      const authToken = localStorage.getItem('auth_token');
+
+      // Make API request
       const response = await fetch('/api/chat', {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
+          ...(authToken && { 'Authorization': `Bearer ${authToken}` })
         },
         body: JSON.stringify(payload),
+        signal: abortControllerRef.current.signal
       });
 
+      // Handle response
       if (!response.ok) {
-        if (response.status === 429) {
-          throw new Error('Rate limit exceeded. Please try again later.');
+        const errorData = await response.json().catch(() => ({}));
+        
+        switch (response.status) {
+          case 400:
+            throw new Error(errorData.error || 'Invalid request format');
+          case 401:
+            throw new Error('Authentication required. Please login.');
+          case 429:
+            throw new Error('Rate limit exceeded. Please try again later.');
+          case 503:
+            throw new Error('Service temporarily unavailable. Please try again.');
+          default:
+            throw new Error(errorData.error || `HTTP error! status: ${response.status}`);
         }
-        if (response.status === 402) {
-          throw new Error('Token quota exceeded. Please upgrade your plan.');
-        }
-        throw new Error(`HTTP error! status: ${response.status}`);
       }
 
-      const data: ChatResponse = await response.json();
+      const data = await response.json();
 
       if (!data.success) {
-        throw new Error(data.error || 'Failed to get response');
+        throw new Error(data.error || 'Failed to get response from AI');
       }
 
-      const responseText = data.message || '';
-      
-      // Add assistant message
-      const assistantMessage: Message = {
-        id: generateId(),
-        content: responseText,
+      // Create AI response message
+      const aiMessage: Message = {
+        id: data.messageId || generateId(),
+        content: data.response,
         role: 'assistant',
         timestamp: new Date(),
+        metadata: {
+          model: payload.settings.model,
+          temperature: payload.settings.temperature,
+          isComplete: !data.response.endsWith('...')
+        }
       };
 
-      conversationMemory.current.push(assistantMessage);
-
+      // Update conversation memory and state
+      conversationMemory.current.push(aiMessage);
+      
       setChatState(prev => ({
         ...prev,
-        messages: [...prev.messages, assistantMessage],
-        isLoading: false,
+        messages: [...prev.messages, aiMessage],
+        currentSessionId: data.sessionId || prev.currentSessionId,
+        canContinue: !aiMessage.metadata?.isComplete
       }));
 
-      // NEW: Check if response is incomplete
-      const isIncomplete = data.isIncomplete || detectIncompleteResponse(responseText);
-      
-      if (isIncomplete) {
-        setCanContinue(true);
-        setLastIncompleteMessage(responseText);
-        setIncompleteMessageId(assistantMessage.id);
-        console.log('🔄 Response detected as incomplete, Continue button will show');
-      }
+      // Success callback
+      onSuccess?.(data.response);
 
     } catch (error) {
-      console.error('Chat error:', error);
+      if (error instanceof Error && error.name === 'AbortError') {
+        // Request was aborted, don't update error state
+        return;
+      }
+
+      const errorMessage = error instanceof Error ? error.message : 'Failed to send message';
+      
+      setChatState(prev => ({
+        ...prev,
+        error: errorMessage
+      }));
+
+      onError?.(errorMessage);
+      throw error; // Re-throw for component handling
+    } finally {
       setChatState(prev => ({
         ...prev,
         isLoading: false,
-        error: error instanceof Error ? error.message : 'Something went wrong',
+        isTyping: false
       }));
+      abortControllerRef.current = null;
     }
-  }, [processFileAttachments, buildConversationContext, detectIncompleteResponse]);
+  }, [chatState.currentSessionId, processFileAttachments, buildConversationContext, onSuccess, onError]);
 
-  // NEW: Continue incomplete message
-  const continueMessage = useCallback(async () => {
-    if (!canContinue || !lastIncompleteMessage || !incompleteMessageId) {
-      console.warn('Cannot continue: missing required state');
-      return;
+  // Continue message function
+  const continueMessage = useCallback(async (): Promise<void> => {
+    const lastMessage = chatState.messages[chatState.messages.length - 1];
+    
+    if (!lastMessage || lastMessage.role !== 'assistant' || !chatState.canContinue) {
+      throw new Error('Cannot continue message');
     }
 
-    console.log('🔄 Continuing message...');
+    await sendMessage('Please continue your previous response.', {
+      continueFrom: lastMessage.content,
+      sessionId: chatState.currentSessionId ?? undefined
+    });
+  }, [chatState.messages, chatState.canContinue, chatState.currentSessionId, sendMessage]);
+
+  // Retry last message
+  const retryLastMessage = useCallback(async (): Promise<void> => {
+    if (retryCount >= maxRetries) {
+      throw new Error(`Maximum retry attempts (${maxRetries}) exceeded`);
+    }
+
+    const userMessages = chatState.messages.filter(msg => msg.role === 'user');
+    const lastUserMessage = userMessages[userMessages.length - 1];
+    
+    if (!lastUserMessage) {
+      throw new Error('No user message to retry');
+    }
+
+    setRetryCount(prev => prev + 1);
+
+    // Wait before retry
+    if (retryDelay > 0) {
+      await new Promise(resolve => setTimeout(resolve, retryDelay));
+    }
+
+    // Remove the last AI response if it exists
+    const newMessages = chatState.messages.filter(msg => 
+      !(msg.role === 'assistant' && msg.timestamp > lastUserMessage.timestamp)
+    );
 
     setChatState(prev => ({
       ...prev,
-      isLoading: true,
-      error: null,
+      messages: newMessages
     }));
 
-    try {
-      // Smart continuation prompt
-      let continuationPrompt = 'Please continue your previous response exactly where you left off.';
-      
-      if (lastIncompleteMessage.includes('```')) {
-        continuationPrompt = 'Please continue the previous response, completing any unfinished code blocks.';
-      } else if (lastIncompleteMessage.match(/^\d+\./m)) {
-        continuationPrompt = 'Please continue the previous numbered list from where it was cut off.';
-      } else if (lastIncompleteMessage.match(/^[-*]/m)) {
-        continuationPrompt = 'Please continue the previous bullet points from where it was interrupted.';
-      }
-
-      const payload = {
-        message: continuationPrompt,
-        attachments: [],
-        conversationContext: buildConversationContext(),
-        continueFrom: lastIncompleteMessage,
-        isContination: true
-      };
-
-      const response = await fetch('/api/chat', {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify(payload),
-      });
-
-      if (!response.ok) {
-        throw new Error(`HTTP error! status: ${response.status}`);
-      }
-
-      const data: ChatResponse = await response.json();
-
-      if (!data.success) {
-        throw new Error(data.error || 'Failed to continue response');
-      }
-
-      const continuedText = data.message || '';
-
-      // Update the last assistant message with continued content
-      setChatState(prev => {
-        const messages = [...prev.messages];
-        const messageIndex = messages.findIndex(msg => msg.id === incompleteMessageId);
-        
-        if (messageIndex !== -1) {
-          const updatedContent = messages[messageIndex].content + continuedText;
-          messages[messageIndex] = {
-            ...messages[messageIndex],
-            content: updatedContent
-          };
-          
-          // Update conversation memory as well
-          const memoryIndex = conversationMemory.current.findIndex(msg => msg.id === incompleteMessageId);
-          if (memoryIndex !== -1) {
-            conversationMemory.current[memoryIndex].content = updatedContent;
-          }
-
-          // Check if still incomplete
-          const stillIncomplete = data.isIncomplete || detectIncompleteResponse(updatedContent);
-          
-          if (stillIncomplete) {
-            setLastIncompleteMessage(updatedContent);
-            console.log('🔄 Response still incomplete, Continue button remains');
-          } else {
-            setCanContinue(false);
-            setLastIncompleteMessage(null);
-            setIncompleteMessageId(null);
-            console.log('✅ Response complete, Continue button hidden');
-          }
-        }
-
-        return {
-          ...prev,
-          messages,
-          isLoading: false,
-        };
-      });
-
-    } catch (error) {
-      console.error('Continue error:', error);
-      setChatState(prev => ({
-        ...prev,
-        isLoading: false,
-        error: error instanceof Error ? error.message : 'Failed to continue response',
-      }));
-    }
-  }, [canContinue, lastIncompleteMessage, incompleteMessageId, buildConversationContext, detectIncompleteResponse]);
-
-  // Clear messages and reset memory
-  const clearMessages = useCallback(() => {
-    setChatState({
-      messages: [],
-      isLoading: false,
-      error: null,
+    // Retry the message
+    await sendMessage(lastUserMessage.content, {
+      files: lastUserMessage.attachments?.map(att => {
+        // Convert back to File object if possible
+        return new File([''], att.name, { type: att.type });
+      }),
+      sessionId: chatState.currentSessionId ?? undefined
     });
+  }, [retryCount, maxRetries, retryDelay, chatState.messages, chatState.currentSessionId, sendMessage]);
+
+  // Clear messages
+  const clearMessages = useCallback(() => {
+    setChatState(prev => ({
+      ...prev,
+      messages: [],
+      error: null,
+      canContinue: false
+    }));
     conversationMemory.current = [];
-    setCanContinue(false);
-    setLastIncompleteMessage(null);
-    setIncompleteMessageId(null);
+    setRetryCount(0);
   }, []);
 
-  // Clear error
-  const clearError = useCallback(() => {
-    setChatState(prev => ({ ...prev, error: null }));
-  }, []);
-
-  // Load messages from storage
-  const loadMessages = useCallback((messages: Message[]) => {
+  // Load messages from storage/session
+  const loadMessages = useCallback((messages: Message[], sessionId?: string) => {
     if (!Array.isArray(messages)) {
       console.error('loadMessages: Invalid messages array');
       return;
     }
 
     const validMessages = messages.filter(msg => {
-      if (!validateMessage(msg)) {
-        console.warn('Invalid message filtered out:', msg);
-        return false;
-      }
-      return true;
+      return (
+        msg &&
+        typeof msg === 'object' &&
+        typeof msg.id === 'string' &&
+        typeof msg.content === 'string' &&
+        (msg.role === 'user' || msg.role === 'assistant') &&
+        (msg.timestamp instanceof Date || typeof msg.timestamp === 'string')
+      );
     }).map(msg => ({
       ...msg,
       timestamp: msg.timestamp instanceof Date ? msg.timestamp : new Date(msg.timestamp)
@@ -426,18 +388,33 @@ export function useChat() {
     setChatState(prev => ({
       ...prev,
       messages: validMessages,
-      isLoading: false,
-      error: null
+      currentSessionId: sessionId || null,
+      error: null,
+      canContinue: false
     }));
 
     conversationMemory.current = [...validMessages];
-    
-    // Reset continue state when loading existing session
-    setCanContinue(false);
-    setLastIncompleteMessage(null);
-    setIncompleteMessageId(null);
+    setRetryCount(0);
+  }, []);
 
-    console.log('Messages loaded successfully:', validMessages.length);
+  // Clear error
+  const clearError = useCallback(() => {
+    setChatState(prev => ({
+      ...prev,
+      error: null
+    }));
+  }, []);
+
+  // Cancel current request
+  const cancelRequest = useCallback(() => {
+    if (abortControllerRef.current) {
+      abortControllerRef.current.abort();
+      setChatState(prev => ({
+        ...prev,
+        isLoading: false,
+        isTyping: false
+      }));
+    }
   }, []);
 
   // Get conversation summary
@@ -464,61 +441,41 @@ export function useChat() {
       messages: conversationMemory.current,
       summary: getConversationSummary(),
       exportedAt: new Date(),
-      version: '1.0'
+      version: '2.0'
     };
   }, [getConversationSummary]);
 
-  // Import conversation
-  const importConversation = useCallback((conversationData: any) => {
-    try {
-      if (conversationData && Array.isArray(conversationData.messages)) {
-        loadMessages(conversationData.messages);
-        return true;
+  // Cleanup on unmount
+  useEffect(() => {
+    return () => {
+      if (abortControllerRef.current) {
+        abortControllerRef.current.abort();
       }
-      return false;
-    } catch (error) {
-      console.error('Error importing conversation:', error);
-      return false;
-    }
-  }, [loadMessages]);
-
-  // Get current conversation state
-  const getConversationState = useCallback(() => {
-    return {
-      messages: chatState.messages,
-      isLoading: chatState.isLoading,
-      error: chatState.error,
-      canContinue,
-      messageCount: chatState.messages.length,
-      hasConversation: chatState.messages.length > 0,
-      conversationMemory: conversationMemory.current,
-      summary: getConversationSummary()
     };
-  }, [chatState, canContinue, getConversationSummary]);
+  }, []);
 
-  // IMPORTANT: Export the continue states and functions
   return {
-    // Core state
+    // State
     messages: chatState.messages,
     isLoading: chatState.isLoading,
+    isTyping: chatState.isTyping,
     error: chatState.error,
-    canContinue,        // NEW: Export continue state
+    canContinue: chatState.canContinue,
+    currentSessionId: chatState.currentSessionId,
+    retryCount,
     
-    // Core actions
+    // Actions
     sendMessage,
-    continueMessage,    // NEW: Export continue function
+    continueMessage,
+    retryLastMessage,
     clearMessages,
-    clearError,
     loadMessages,
+    clearError,
+    cancelRequest,
     
-    // Advanced features
+    // Utilities
     getConversationSummary,
-    getConversationState,
     exportConversation,
-    importConversation,
-    
-    // Utility functions
-    validateMessage,
     processFileAttachments
   };
 }

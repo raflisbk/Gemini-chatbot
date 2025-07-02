@@ -15,6 +15,7 @@ import {
 // ===========================
 
 interface AuthUser {
+  photoURL: undefined;
   id: string;
   email: string;
   name: string;

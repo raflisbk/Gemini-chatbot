@@ -21,7 +21,13 @@ import {
   CheckCircle,
   Clock,
   Zap,
-  FileText
+  FileText,
+  Home,
+  Mic,
+  MicOff,
+  Volume2,
+  VolumeX,
+  Loader2
 } from 'lucide-react';
 
 // UI Components
@@ -38,6 +44,8 @@ import { FileUpload } from './FileUpload';
 import { CodeMode } from './CodeMode';
 import { LoadingDots } from './LoadingDots';
 import { Logo } from './Logo';
+import { ThemeToggle } from './ThemeToggle';
+import { SettingsDialog } from './SettingsDialog';
 
 // Context and Utilities
 import { useAuth } from '@/context/AuthContext';
@@ -68,6 +76,31 @@ interface ChatSettings {
   autoSave: boolean;
 }
 
+// Voice Recognition Interface
+interface VoiceRecognition {
+  isListening: boolean;
+  isSupported: boolean;
+  recognition: SpeechRecognition | null;
+}
+
+// Typing Indicator Component
+const TypingIndicator = () => (
+  <motion.div
+    initial={{ opacity: 0, y: 10 }}
+    animate={{ opacity: 1, y: 0 }}
+    exit={{ opacity: 0, y: -10 }}
+    className="flex items-center gap-2 px-4 py-2 text-muted-foreground"
+  >
+    <Bot className="h-4 w-4" />
+    <span className="text-sm">AI sedang mengetik</span>
+    <div className="flex gap-1">
+      <div className="w-1 h-1 bg-current rounded-full animate-bounce" style={{ animationDelay: '0ms' }} />
+      <div className="w-1 h-1 bg-current rounded-full animate-bounce" style={{ animationDelay: '150ms' }} />
+      <div className="w-1 h-1 bg-current rounded-full animate-bounce" style={{ animationDelay: '300ms' }} />
+    </div>
+  </motion.div>
+);
+
 export function ChatBot() {
   // Auth context
   const { 
@@ -80,7 +113,8 @@ export function ChatBot() {
     updateUsage,
     refreshUsage,
     chatSettings,
-    modelSettings
+    modelSettings,
+    logout
   } = useAuth();
 
   // Core chat state
@@ -92,54 +126,118 @@ export function ChatBot() {
   // UI state
   const [showSidebar, setShowSidebar] = useState(false);
   const [showWelcome, setShowWelcome] = useState(true);
-  const [searchQuery, setSearchQuery] = useState('');
+  const [showSettings, setShowSettings] = useState(false);
+  const [showUpload, setShowUpload] = useState(false);
   const [isInitializing, setIsInitializing] = useState(true);
   
-  // Chat sessions
-  const [chatSessions, setChatSessions] = useState<ChatSession[]>([]);
-  
-  // File uploads
+  // Enhanced features state
+  const [isTyping, setIsTyping] = useState(false);
+  const [voiceRecognition, setVoiceRecognition] = useState<VoiceRecognition>({
+    isListening: false,
+    isSupported: false,
+    recognition: null
+  });
+  const [speechEnabled, setSpeechEnabled] = useState(false);
+
+  // File upload state
   const [uploadedFiles, setUploadedFiles] = useState<UploadedFile[]>([]);
-  const [isUploadingFiles, setIsUploadingFiles] = useState(false);
+  const [uploadProgress, setUploadProgress] = useState<Record<string, number>>({});
+
+  // Session management
+  const [chatSessions, setChatSessions] = useState<ChatSession[]>([]);
+  const [searchQuery, setSearchQuery] = useState('');
   
-  // Features
-  const [isCodeMode, setIsCodeMode] = useState(false);
-  const [trendingTopics, setTrendingTopics] = useState<TrendingTopic[]>([]);
-  const [loadingTrending, setLoadingTrending] = useState(false);
-  
-  // Error handling
+  // Error and retry state
   const [error, setError] = useState<string | null>(null);
   const [retryCount, setRetryCount] = useState(0);
+  
+  // Trending topics
+  const [trendingTopics, setTrendingTopics] = useState<TrendingTopic[]>([]);
+  const [loadingTrending, setLoadingTrending] = useState(false);
+
+  // Code mode
+  const [isCodeMode, setIsCodeMode] = useState(false);
 
   // Refs
-  const inputRef = useRef<HTMLTextAreaElement>(null);
-  const chatContainerRef = useRef<HTMLDivElement>(null);
   const messagesEndRef = useRef<HTMLDivElement>(null);
+  const inputRef = useRef<HTMLTextAreaElement>(null);
+  const fileInputRef = useRef<HTMLInputElement>(null);
 
-  // Debounced search
-  const debouncedSearch = useCallback(
-    debounce((query: string) => setSearchQuery(query), 300),
-    []
-  );
+  // Initialize Voice Recognition
+  useEffect(() => {
+    if ('webkitSpeechRecognition' in window || 'SpeechRecognition' in window) {
+      const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
+      const recognition = new SpeechRecognition();
+      
+      recognition.continuous = false;
+      recognition.interimResults = true;
+      recognition.lang = 'id-ID'; // Indonesian language
+
+      recognition.onstart = () => {
+        setVoiceRecognition(prev => ({ ...prev, isListening: true }));
+      };
+
+      recognition.onresult = (event) => {
+        const transcript = Array.from(event.results)
+          .map(result => result[0])
+          .map(result => result.transcript)
+          .join('');
+
+        setInput(transcript);
+      };
+
+      recognition.onerror = (event) => {
+        console.error('Speech recognition error:', event.error);
+        setVoiceRecognition(prev => ({ ...prev, isListening: false }));
+      };
+
+      recognition.onend = () => {
+        setVoiceRecognition(prev => ({ ...prev, isListening: false }));
+      };
+
+      setVoiceRecognition({
+        isListening: false,
+        isSupported: true,
+        recognition
+      });
+    }
+  }, []);
+
+  // Initialize Text-to-Speech
+  const speakText = useCallback((text: string) => {
+    if (!speechEnabled || !window.speechSynthesis) return;
+
+    // Cancel any ongoing speech
+    window.speechSynthesis.cancel();
+
+    const utterance = new SpeechSynthesisUtterance(text);
+    utterance.lang = 'id-ID';
+    utterance.rate = 0.9;
+    utterance.pitch = 1;
+    
+    window.speechSynthesis.speak(utterance);
+  }, [speechEnabled]);
+
+  // Voice input toggle
+  const toggleVoiceInput = useCallback(() => {
+    if (!voiceRecognition.isSupported || !voiceRecognition.recognition) return;
+
+    if (voiceRecognition.isListening) {
+      voiceRecognition.recognition.stop();
+    } else {
+      voiceRecognition.recognition.start();
+    }
+  }, [voiceRecognition]);
 
   // Load chat sessions
   const loadChatSessions = useCallback(async () => {
     try {
       const sessions = await ChatStorage.getSessions(user?.id);
       setChatSessions(sessions);
-      
-      // If no current session and we have sessions, load the most recent
-      if (!currentSessionId && sessions.length > 0) {
-        const latestSession = sessions[0];
-        setCurrentSessionId(latestSession.id);
-        setMessages(latestSession.messages);
-        setShowWelcome(false);
-      }
     } catch (error) {
       console.error('Error loading chat sessions:', error);
-      setError('Failed to load chat history');
     }
-  }, [user?.id, currentSessionId]);
+  }, [user?.id]);
 
   // Load trending topics
   const loadTrendingTopics = useCallback(async () => {
@@ -200,6 +298,17 @@ export function ChatBot() {
     loadChatSessions();
   }, [user?.id, loadChatSessions]);
 
+  // Go to home
+  const goToHome = useCallback(() => {
+    setCurrentSessionId(null);
+    setMessages([]);
+    setUploadedFiles([]);
+    setShowWelcome(true);
+    setError(null);
+    setRetryCount(0);
+    setShowSidebar(false);
+  }, []);
+
   // Load existing session
   const loadSession = useCallback(async (sessionId: string) => {
     try {
@@ -222,326 +331,225 @@ export function ChatBot() {
     }
   }, [user?.id]);
 
-  // Delete session
-  const deleteSession = useCallback(async (sessionId: string, event: React.MouseEvent) => {
-    event.stopPropagation();
+  // Enhanced send message with typing indicator
+  const sendMessage = useCallback(async (messageContent?: string, files?: File[]) => {
+    const content = messageContent || input.trim();
     
-    try {
-      await ChatStorage.deleteSession(sessionId, user?.id);
-      
-      // If deleting current session, start new chat
-      if (sessionId === currentSessionId) {
-        startNewChat();
-      }
-      
-      // Reload sessions
-      await loadChatSessions();
-    } catch (error) {
-      console.error('Error deleting session:', error);
-      setError('Failed to delete conversation');
-    }
-  }, [user?.id, currentSessionId, startNewChat, loadChatSessions]);
+    if (!content && (!files || files.length === 0)) return;
 
-  // Handle file uploads
-// NEW - Replace with this:
-const handleFilesSelected = useCallback((files: File[]) => {
-  // Convert File[] to UploadedFile[] temporarily for UI
-  const tempUploadedFiles: UploadedFile[] = files.map(file => ({
-    id: generateId(), // Temporary ID
-    name: file.name,
-    originalName: file.name,
-    size: file.size,
-    type: file.type,
-    url: '' // Will be filled after actual upload
-  }));
-  
-  setUploadedFiles(prev => [...prev, ...tempUploadedFiles]);
-  setError(null);
-  }, []);
-
-  const handleFileUploadError = useCallback((error: string) => {
-    setError(error);
-  }, []);
-
-  const removeUploadedFile = useCallback((fileId: string) => {
-    setUploadedFiles(prev => prev.filter(f => f.id !== fileId));
-  }, []);
-
-  // Handle trending topic click
-  const handleTrendingClick = useCallback((topic: TrendingTopic) => {
-    setInput(topic.prompt);
-    setIsCodeMode(false);
-    if (inputRef.current) {
-      inputRef.current.focus();
-    }
-  }, []);
-
-  // Handle code template selection
-  const handleCodeTemplate = useCallback((template: string) => {
-    setInput(template);
-    setIsCodeMode(true);
-    if (inputRef.current) {
-      inputRef.current.focus();
-    }
-  }, []);
-
-  // Send message
-  const sendMessage = useCallback(async () => {
-    if (!input.trim() && uploadedFiles.length === 0) return;
-    
-    // Check quota
-    if (isGuest && usage.remainingQuota <= 0) {
-      setError('Daily message limit reached. Please login for more messages.');
-      return;
-    }
-    
-    if (isAuthenticated && usage.remainingQuota <= 0) {
-      setError('Daily message limit reached. Please upgrade your account.');
-      return;
-    }
-
-    const messageContent = input.trim();
-    const attachments = [...uploadedFiles];
-    
-    // Clear input and files
     setInput('');
-    setUploadedFiles([]);
     setError(null);
     setIsLoading(true);
-    setShowWelcome(false);
+    setIsTyping(true); // Show typing indicator
 
     // Create user message
     const userMessage: Message = {
       id: generateId(),
+      content,
       role: 'user',
-      content: messageContent,
       timestamp: new Date(),
-      attachments: attachments.length > 0 ? attachments : undefined
+      attachments: files ? files.map(file => ({
+        id: generateId(),
+        name: file.name,
+        type: file.type,
+        size: file.size,
+        url: URL.createObjectURL(file)
+      })) : undefined
     };
 
-    // Add user message to UI
     setMessages(prev => [...prev, userMessage]);
+    setShowWelcome(false);
 
     try {
-      // Ensure we have a session
-      let sessionId = currentSessionId;
-      if (!sessionId) {
-        const newSession = ChatStorage.createNewSession(
-          messageContent.substring(0, 50) + (messageContent.length > 50 ? '...' : ''),
-          user?.id
+      // Prepare request payload
+      const payload: any = {
+        message: content,
+        sessionId: currentSessionId || undefined
+      };
+
+      // Handle file attachments
+      if (files && files.length > 0) {
+        payload.attachments = await Promise.all(
+          files.map(async (file) => ({
+            id: generateId(),
+            name: file.name,
+            type: file.type,
+            size: file.size,
+            url: URL.createObjectURL(file) // Temporary URL for client-side
+          }))
         );
-        sessionId = newSession.id;
-        setCurrentSessionId(sessionId);
-        await ChatStorage.saveSession(newSession, user?.id);
-      }
-
-      // Add user message to session
-      await ChatStorage.addMessageToSession(sessionId, {
-        role: 'user',
-        content: messageContent,
-        attachments: attachments.length > 0 ? attachments : undefined
-      }, user?.id);
-
-      // Prepare API request
-      const requestBody = {
-        message: messageContent,
-        sessionId,
-        attachments: attachments.map(file => ({
-          id: file.id,
-          name: file.name,
-          type: file.type,
-          size: file.size,
-          url: file.url
-        })),
-        settings: {
-          model: modelSettings.model,
-          temperature: modelSettings.temperature,
-          maxTokens: modelSettings.maxTokens,
-          systemPrompt: modelSettings.systemPrompt
-        }
-      };
-
-      // Send to API
-      const token = localStorage.getItem('auth_token');
-      const headers: Record<string, string> = {
-        'Content-Type': 'application/json',
-      };
-      
-      if (token) {
-        headers.Authorization = `Bearer ${token}`;
       }
 
       const response = await fetch('/api/chat', {
         method: 'POST',
-        headers,
-        body: JSON.stringify(requestBody),
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify(payload),
       });
+
+      if (!response.ok) {
+        const errorData = await response.json();
+        throw new Error(errorData.error || `HTTP error! status: ${response.status}`);
+      }
 
       const data = await response.json();
 
-      if (!response.ok) {
-        throw new Error(data.error || `HTTP ${response.status}`);
-      }
+      if (data.success) {
+        // Create AI response message
+        const aiMessage: Message = {
+          id: data.messageId || generateId(),
+          content: data.response,
+          role: 'assistant',
+          timestamp: new Date()
+        };
 
-      if (!data.success) {
-        throw new Error(data.error || 'Failed to get response');
-      }
-
-      // Create AI message
-      const aiMessage: Message = {
-        id: generateId(),
-        role: 'assistant',
-        content: data.response,
-        timestamp: new Date(),
-        metadata: {
-          model: modelSettings.model,
-          sessionId: data.sessionId
+        setMessages(prev => [...prev, aiMessage]);
+        
+        // Update session ID if new
+        if (data.sessionId && !currentSessionId) {
+          setCurrentSessionId(data.sessionId);
         }
-      };
 
-      // Add AI message to UI
-      setMessages(prev => [...prev, aiMessage]);
+        // Update usage if provided
+        if (data.usage) {
+          updateUsage?.(data.usage);
+        }
 
-      // Add AI message to session
-      await ChatStorage.addMessageToSession(sessionId, {
-        role: 'assistant',
-        content: data.response,
-        metadata: aiMessage.metadata
-      }, user?.id);
+        // Speak response if enabled
+        if (speechEnabled && data.response) {
+          speakText(data.response);
+        }
 
-      // Update session title if it's the first message
-      const session = await ChatStorage.getSessionById(sessionId, user?.id);
-      if (session && session.messages.length <= 2) {
-        const title = messageContent.substring(0, 50) + (messageContent.length > 50 ? '...' : '');
-        await ChatStorage.updateSessionTitle(sessionId, title, user?.id);
-      }
-
-      // Update usage
-      await updateUsage('message');
-      
-      // Reload sessions to reflect changes
-      await loadChatSessions();
-      
-      // Reset retry count on success
-      setRetryCount(0);
-
-    } catch (error) {
-      console.error('Error sending message:', error);
-      
-      // Remove user message from UI on error
-      setMessages(prev => prev.slice(0, -1));
-      
-      // Restore input and files
-      setInput(messageContent);
-      setUploadedFiles(attachments);
-      
-      // Handle specific errors
-      if (error instanceof Error) {
-        if (error.message.includes('quota') || error.message.includes('limit')) {
-          setError('Daily message limit reached. Please try again tomorrow or upgrade your account.');
-        } else if (error.message.includes('network') || error.message.includes('fetch')) {
-          setError('Network error. Please check your connection and try again.');
-        } else if (error.message.includes('401') || error.message.includes('unauthorized')) {
-          setError('Session expired. Please refresh the page and login again.');
-        } else {
-          setError(`Failed to send message: ${error.message}`);
+        // Save session
+        if (user?.id) {
+          const sessionData = {
+            id: data.sessionId || currentSessionId || generateId(),
+            title: content.slice(0, 50) + (content.length > 50 ? '...' : ''),
+            messages: [...messages, userMessage, aiMessage],
+            userId: user.id,
+            createdAt: new Date(),
+            updatedAt: new Date()
+          };
+          ChatStorage.saveSession(sessionData, user.id);
+          loadChatSessions();
         }
       } else {
-        setError('An unexpected error occurred. Please try again.');
+        throw new Error(data.error || 'Failed to get response');
       }
-      
-      // Increment retry count
+    } catch (error) {
+      console.error('Send message error:', error);
+      setError(error instanceof Error ? error.message : 'Failed to send message');
       setRetryCount(prev => prev + 1);
     } finally {
       setIsLoading(false);
+      setIsTyping(false); // Hide typing indicator
     }
-  }, [
-    input, 
-    uploadedFiles, 
-    isGuest, 
-    isAuthenticated, 
-    usage.remainingQuota, 
-    currentSessionId, 
-    user?.id, 
-    modelSettings,
-    updateUsage,
-    loadChatSessions
-  ]);
+  }, [input, currentSessionId, user, messages, updateUsage, loadChatSessions, speechEnabled, speakText]);
 
-  // Handle key press
-  const handleKeyPress = useCallback((e: React.KeyboardEvent) => {
-    if (e.key === 'Enter' && !e.shiftKey) {
-      e.preventDefault();
-      sendMessage();
-    }
+  // Handle file upload
+  const handleFileUpload = useCallback(async (files: File[]) => {
+    if (!files.length) return;
+
+    setShowUpload(false);
+    await sendMessage('', files);
   }, [sendMessage]);
 
-  // Retry last message
-  const retryLastMessage = useCallback(() => {
-    if (retryCount < 3) {
-      sendMessage();
-    } else {
-      setError('Maximum retry attempts reached. Please try a different message.');
+  // Handle trending topic click
+  const handleTrendingClick = useCallback(async (topic: TrendingTopic) => {
+    await sendMessage(topic.prompt);
+  }, [sendMessage]);
+
+  // Delete session
+  const deleteSession = useCallback(async (sessionId: string) => {
+    try {
+      await ChatStorage.deleteSession(sessionId, user?.id);
+      setChatSessions(prev => prev.filter(s => s.id !== sessionId));
+      
+      if (currentSessionId === sessionId) {
+        goToHome();
+      }
+    } catch (error) {
+      console.error('Error deleting session:', error);
     }
-  }, [retryCount, sendMessage]);
+  }, [currentSessionId, user?.id, goToHome]);
 
-  // Filter sessions based on search
-  const filteredSessions = chatSessions.filter(session => {
-    if (!searchQuery) return true;
-    
-    const query = searchQuery.toLowerCase();
-    const title = session.title.toLowerCase();
-    const hasMatchingMessage = session.messages.some(msg => 
-      msg.content.toLowerCase().includes(query)
-    );
-    
-    return title.includes(query) || hasMatchingMessage;
-  });
+  // Filter sessions
+  const filteredSessions = chatSessions.filter(session =>
+    session.title.toLowerCase().includes(searchQuery.toLowerCase())
+  );
 
-  // Show loading state during initialization
-  if (isInitializing) {
+  // Handle keyboard shortcuts
+  useEffect(() => {
+    const handleKeyDown = (event: KeyboardEvent) => {
+      // Ctrl/Cmd + N: New chat
+      if ((event.ctrlKey || event.metaKey) && event.key === 'n') {
+        event.preventDefault();
+        startNewChat();
+      }
+      
+      // Ctrl/Cmd + /: Toggle sidebar
+      if ((event.ctrlKey || event.metaKey) && event.key === '/') {
+        event.preventDefault();
+        setShowSidebar(prev => !prev);
+      }
+
+      // Ctrl/Cmd + K: Focus search
+      if ((event.ctrlKey || event.metaKey) && event.key === 'k') {
+        event.preventDefault();
+        // Focus search if sidebar is open
+        if (showSidebar) {
+          const searchInput = document.querySelector('[placeholder="Search conversations..."]') as HTMLInputElement;
+          searchInput?.focus();
+        }
+      }
+    };
+
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, [startNewChat, showSidebar]);
+
+  if (isInitializing || authLoading) {
     return (
-      <div className="min-h-screen flex items-center justify-center">
-        <motion.div
-          animate={{ rotate: 360 }}
-          transition={{ duration: 2, repeat: Infinity, ease: "linear" }}
-          className="w-8 h-8 border-2 border-primary border-t-transparent rounded-full"
-        />
+      <div className="flex items-center justify-center min-h-screen">
+        <div className="text-center">
+          <Loader2 className="h-8 w-8 animate-spin mx-auto mb-4" />
+          <p className="text-muted-foreground">Loading...</p>
+        </div>
       </div>
     );
   }
 
   return (
-    <div className="min-h-screen bg-gradient-to-br from-background via-background to-muted/20">
-      {/* Main Chat Interface */}
-      <div className={`flex h-screen ${showSidebar ? 'lg:pl-80' : ''} transition-all duration-300`}>
-        
-        {/* Sidebar */}
-        <AnimatePresence>
-          {showSidebar && (
-            <>
-              {/* Mobile overlay */}
-              <motion.div
-                initial={{ opacity: 0 }}
-                animate={{ opacity: 1 }}
-                exit={{ opacity: 0 }}
-                className="fixed inset-0 bg-black/50 lg:hidden z-40"
-                onClick={() => setShowSidebar(false)}
-              />
-              
-              {/* Sidebar content */}
-              <motion.div
-                initial={{ x: -320 }}
-                animate={{ x: 0 }}
-                exit={{ x: -320 }}
-                transition={{ type: "spring", damping: 25, stiffness: 300 }}
-                className="fixed top-0 left-0 h-full w-80 bg-card border-r border-border z-50 lg:z-auto"
-              >
-                <div className="flex flex-col h-full">
-                  {/* Sidebar header */}
-                  <div className="p-4 border-b border-border">
-                    <div className="flex items-center justify-between mb-4">
-                      <Logo />
+    <div className="flex h-screen bg-background relative">
+      {/* Enhanced Sidebar */}
+      <AnimatePresence>
+        {showSidebar && (
+          <>
+            {/* Mobile overlay */}
+            <motion.div
+              initial={{ opacity: 0 }}
+              animate={{ opacity: 1 }}
+              exit={{ opacity: 0 }}
+              onClick={() => setShowSidebar(false)}
+              className="fixed inset-0 bg-black/50 z-40 lg:hidden"
+            />
+            
+            {/* Sidebar */}
+            <motion.div
+              initial={{ x: -320 }}
+              animate={{ x: 0 }}
+              exit={{ x: -320 }}
+              transition={{ type: 'spring', damping: 30, stiffness: 300 }}
+              className="fixed left-0 top-0 h-full w-80 bg-card border-r border-border z-50 lg:relative lg:z-0 sidebar-glass"
+            >
+              <div className="flex flex-col h-full">
+                {/* Sidebar Header */}
+                <div className="p-4 border-b border-border">
+                  <div className="flex items-center justify-between mb-4">
+                    <Logo />
+                    <div className="flex items-center gap-2">
+                      <ThemeToggle />
                       <Button
                         variant="ghost"
                         size="icon"
@@ -551,583 +559,616 @@ const handleFilesSelected = useCallback((files: File[]) => {
                         <X className="h-4 w-4" />
                       </Button>
                     </div>
-                    
-                    {/* New chat button */}
-                    <Button 
-                      onClick={startNewChat}
-                      className="w-full gap-2 bg-gradient-to-r from-emerald-500 to-blue-500 hover:from-emerald-600 hover:to-blue-600 text-white"
-                    >
-                      <Plus className="h-4 w-4" />
-                      New Chat
-                    </Button>
                   </div>
+                  
+                  {/* New Chat Button */}
+                  <Button
+                    onClick={startNewChat}
+                    className="w-full gap-2 enhanced-button"
+                  >
+                    <Plus className="h-4 w-4" />
+                    New Chat
+                  </Button>
+                </div>
 
-                  {/* User info */}
-                  {isAuthenticated && user && (
-                    <div className="p-4 border-b border-border">
-                      <div className="flex items-center gap-3">
-                        <div className="w-8 h-8 bg-gradient-to-br from-emerald-500 to-blue-500 rounded-full flex items-center justify-center text-white text-sm font-medium">
-                          {user.name.charAt(0).toUpperCase()}
-                        </div>
-                        <div className="flex-1 min-w-0">
-                          <p className="text-sm font-medium truncate">{user.name}</p>
-                          <p className="text-xs text-muted-foreground truncate">{user.email}</p>
-                        </div>
-                        <Badge variant={isAdmin ? "default" : "secondary"}>
-                          {isAdmin ? 'Admin' : 'User'}
-                        </Badge>
-                      </div>
-                      
-                      {/* Usage info */}
-                      <div className="mt-3 p-2 bg-muted/30 rounded-lg">
-                        <div className="flex items-center justify-between text-xs">
-                          <span>Messages today:</span>
-                          <span className="font-medium">{usage.messageCount}</span>
-                        </div>
-                        <div className="flex items-center justify-between text-xs mt-1">
-                          <span>Remaining:</span>
-                          <span className={cn(
-                            "font-medium",
-                            usage.remainingQuota < 10 ? "text-red-500" : "text-green-500"
-                          )}>
-                            {usage.remainingQuota}
-                          </span>
-                        </div>
-                      </div>
-                    </div>
-                  )}
+                {/* Search */}
+                <div className="p-4 border-b border-border">
+                  <div className="relative">
+                    <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 h-4 w-4 text-muted-foreground" />
+                    <Input
+                      placeholder="Search conversations..."
+                      value={searchQuery}
+                      onChange={(e) => setSearchQuery(e.target.value)}
+                      className="pl-10"
+                    />
+                  </div>
+                </div>
 
-                  {/* Guest info */}
-                  {isGuest && (
-                    <div className="p-4 border-b border-border">
-                      <div className="p-3 bg-muted/30 rounded-lg">
-                        <div className="flex items-center gap-2 mb-2">
-                          <User className="h-4 w-4 text-muted-foreground" />
-                          <span className="text-sm font-medium">Guest Mode</span>
-                        </div>
-                        <p className="text-xs text-muted-foreground mb-2">
-                          Limited to {usage.remainingQuota} messages per day
-                        </p>
-                        <Button 
-                          size="sm" 
-                          className="w-full"
-                          onClick={() => {/* Navigate to login */}}
+                {/* Chat Sessions */}
+                <ScrollArea className="flex-1 p-4">
+                  <div className="space-y-2">
+                    {filteredSessions.length > 0 ? (
+                      filteredSessions.map((session) => (
+                        <div
+                          key={session.id}
+                          className="group relative p-3 rounded-lg hover:bg-muted/50 cursor-pointer transition-all sidebar-item"
+                          onClick={() => loadSession(session.id)}
                         >
-                          Login for More
-                        </Button>
-                      </div>
-                    </div>
-                  )}
-
-                  {/* Search */}
-                  <div className="p-4 border-b border-border">
-                    <div className="relative">
-                      <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 h-4 w-4 text-muted-foreground" />
-                      <Input
-                        placeholder="Search conversations..."
-                        className="pl-10"
-                        onChange={(e) => debouncedSearch(e.target.value)}
-                      />
-                    </div>
-                  </div>
-
-                  {/* Chat sessions */}
-                  <ScrollArea className="flex-1 p-2">
-                    <div className="space-y-1">
-                      {filteredSessions.length === 0 ? (
-                        <div className="p-4 text-center text-muted-foreground">
-                          <MessageSquare className="h-8 w-8 mx-auto mb-2 opacity-50" />
-                          <p className="text-sm">No conversations yet</p>
-                          <p className="text-xs">Start chatting to see them here</p>
-                        </div>
-                      ) : (
-                        filteredSessions.map((session) => (
-                          <motion.div
-                            key={session.id}
-                            whileHover={{ scale: 1.02 }}
-                            whileTap={{ scale: 0.98 }}
-                            className={cn(
-                              "group flex items-center gap-3 p-3 rounded-lg cursor-pointer transition-all",
-                              currentSessionId === session.id 
-                                ? "bg-primary/10 border border-primary/20" 
-                                : "hover:bg-muted/50"
-                            )}
-                            onClick={() => loadSession(session.id)}
-                          >
-                            <MessageSquare className={cn(
-                              "h-4 w-4 shrink-0",
-                              currentSessionId === session.id ? "text-primary" : "text-muted-foreground"
-                            )} />
-                            
+                          <div className="flex items-center gap-3">
+                            <MessageSquare className="h-4 w-4 text-muted-foreground" />
                             <div className="flex-1 min-w-0">
-                              <h4 className="text-sm font-medium truncate">{session.title}</h4>
+                              <p className="text-sm font-medium truncate">
+                                {session.title}
+                              </p>
                               <p className="text-xs text-muted-foreground">
-                                {session.messages.length} messages • {new Date(session.updatedAt).toLocaleDateString()}
+                                {session.updatedAt.toLocaleDateString()}
                               </p>
                             </div>
-                            
                             <Button
                               variant="ghost"
                               size="icon"
-                              className="opacity-0 group-hover:opacity-100 transition-opacity h-6 w-6"
-                              onClick={(e) => deleteSession(session.id, e)}
+                              className="opacity-0 group-hover:opacity-100 transition-opacity h-6 w-6 delete-button"
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                deleteSession(session.id);
+                              }}
                             >
                               <Trash2 className="h-3 w-3" />
                             </Button>
-                          </motion.div>
-                        ))
-                      )}
-                    </div>
-                  </ScrollArea>
-
-                  {/* Sidebar footer */}
-                  <div className="p-4 border-t border-border">
-                    <Button
-                      variant="ghost"
-                      size="sm"
-                      className="w-full gap-2"
-                      onClick={() => {/* Open settings */}}
-                    >
-                      <Settings className="h-4 w-4" />
-                      Settings
-                    </Button>
-                  </div>
-                </div>
-              </motion.div>
-            </>
-          )}
-        </AnimatePresence>
-
-        {/* Main content */}
-        <div className="flex-1 flex flex-col">
-          {/* Header */}
-          <div className="border-b border-border bg-background/80 backdrop-blur-sm">
-            <div className="flex items-center justify-between p-4">
-              <div className="flex items-center gap-3">
-                <Button
-                  variant="ghost"
-                  size="icon"
-                  onClick={() => setShowSidebar(!showSidebar)}
-                >
-                  <Menu className="h-4 w-4" />
-                </Button>
-                
-                <div className="hidden sm:block">
-                  {currentSessionId ? (
-                    <div>
-                      <h1 className="text-lg font-semibold">
-                        {chatSessions.find(s => s.id === currentSessionId)?.title || 'Chat'}
-                      </h1>
-                      <p className="text-sm text-muted-foreground">
-                        {messages.length} messages
-                      </p>
-                    </div>
-                  ) : (
-                    <h1 className="text-lg font-semibold">AI Assistant</h1>
-                  )}
-                </div>
-              </div>
-
-              <div className="flex items-center gap-2">
-                {/* Refresh button */}
-                <Button
-                  variant="ghost"
-                  size="icon"
-                  onClick={() => refreshUsage()}
-                  title="Refresh"
-                >
-                  <RefreshCw className="h-4 w-4" />
-                </Button>
-                
-                {/* Settings button */}
-                <Button
-                  variant="ghost"
-                  size="icon"
-                  title="Settings"
-                >
-                  <Settings className="h-4 w-4" />
-                </Button>
-              </div>
-            </div>
-          </div>
-
-          {/* Chat Area */}
-          <div 
-            ref={chatContainerRef}
-            className="flex-1 overflow-hidden"
-          >
-            <ScrollArea className="h-full">
-              <div className="max-w-4xl mx-auto">
-                {/* Welcome screen */}
-                {messages.length === 0 && showWelcome && (
-                  <motion.div
-                    initial={{ opacity: 0, y: 20 }}
-                    animate={{ opacity: 1, y: 0 }}
-                    className="flex flex-col items-center justify-center min-h-[60vh] p-8 text-center"
-                  >
-                    <motion.div
-                      animate={{ 
-                        scale: [1, 1.05, 1],
-                        rotate: [0, 1, -1, 0]
-                      }}
-                      transition={{ 
-                        duration: 4,
-                        repeat: Infinity,
-                        ease: "easeInOut"
-                      }}
-                      className="mb-8"
-                    >
-                      <div className="w-20 h-20 bg-gradient-to-br from-emerald-500 to-blue-500 rounded-2xl flex items-center justify-center text-white shadow-2xl">
-                        <Bot className="w-10 h-10" />
-                      </div>
-                    </motion.div>
-                    
-                    <h1 className="text-4xl font-bold bg-gradient-to-r from-emerald-600 to-blue-600 bg-clip-text text-transparent mb-4">
-                      Welcome to AI Assistant
-                    </h1>
-                    <p className="text-xl text-muted-foreground mb-8 max-w-2xl">
-                      Chat with advanced AI, upload files for analysis, get help with coding, and explore Indonesian trending topics.
-                    </p>
-
-                    {/* Trending topics */}
-                    {trendingTopics.length > 0 && (
-                      <div className="w-full max-w-4xl mb-8">
-                        <div className="flex items-center gap-2 mb-4">
-                          <Zap className="h-5 w-5 text-emerald-500" />
-                          <h2 className="text-lg font-semibold">Trending in Indonesia</h2>
-                          {loadingTrending && (
-                            <div className="w-4 h-4 border-2 border-emerald-500 border-t-transparent rounded-full animate-spin" />
-                          )}
-                        </div>
-                        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3">
-                          {trendingTopics.map((topic, index) => (
-                            <motion.button
-                              key={index}
-                              initial={{ opacity: 0, y: 20 }}
-                              animate={{ opacity: 1, y: 0 }}
-                              transition={{ delay: index * 0.1 }}
-                              whileHover={{ scale: 1.02 }}
-                              whileTap={{ scale: 0.98 }}
-                              onClick={() => handleTrendingClick(topic)}
-                              className="p-4 text-left rounded-lg border border-border hover:border-primary/50 transition-all bg-gradient-to-r from-emerald-50/50 to-blue-50/50 dark:from-emerald-950/20 dark:to-blue-950/20"
-                            >
-                              <div className="flex items-start gap-2">
-                                <div className="w-2 h-2 bg-emerald-500 rounded-full mt-2 shrink-0" />
-                                <div>
-                                  <h3 className="font-medium text-sm mb-1">{topic.title}</h3>
-                                  <Badge variant="secondary" className="text-xs">
-                                    {topic.category}
-                                  </Badge>
-                                </div>
-                              </div>
-                            </motion.button>
-                          ))}
-                        </div>
-                      </div>
-                    )}
-
-                    {/* Quick actions for file upload */}
-                    <div className="w-full max-w-2xl">
-                      <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mb-8">
-                        {[
-                          { icon: Upload, label: "Upload & Analyze", desc: "Drag files here or click to browse" },
-                          { icon: FileText, label: "Ask Questions", desc: "Get help with any topic" },
-                          { icon: Bot, label: "AI Assistance", desc: "Code, write, translate & more" }
-                        ].map((action, index) => (
-                          <motion.div
-                            key={index}
-                            initial={{ opacity: 0, y: 20 }}
-                            animate={{ opacity: 1, y: 0 }}
-                            transition={{ delay: 0.6 + index * 0.1 }}
-                            className="p-4 rounded-lg border border-border bg-card/50 hover:bg-card/80 transition-colors"
-                          >
-                            <action.icon className="h-6 w-6 text-emerald-500 mb-2" />
-                            <h3 className="font-medium text-sm mb-1">{action.label}</h3>
-                            <p className="text-xs text-muted-foreground">{action.desc}</p>
-                          </motion.div>
-                        ))}
-                      </div>
-
-                      {/* Upload prompts for welcome screen */}
-                      {!isGuest && (
-                        <div className="mb-6">
-                          <p className="text-sm text-muted-foreground mb-3">Try these prompts with file uploads:</p>
-                          <div className="grid grid-cols-1 gap-2">
-                            {[
-                              "Analyze this document and summarize the key points",
-                              "Extract data from this spreadsheet and create insights",
-                              "Review this code and suggest improvements"
-                            ].map((prompt, index) => (
-                              <motion.button
-                                key={index}
-                                initial={{ opacity: 0, x: -20 }}
-                                animate={{ opacity: 1, x: 0 }}
-                                transition={{ delay: 0.9 + index * 0.1 }}
-                                whileHover={{ scale: 1.01 }}
-                                whileTap={{ scale: 0.99 }}
-                                onClick={() => {
-                                  setInput(prompt);
-                                  inputRef.current?.focus();
-                                }}
-                                className="p-3 text-left rounded-lg border border-border hover:border-primary/50 transition-all bg-gradient-to-r from-blue-50/50 to-purple-50/50 dark:from-blue-950/20 dark:to-purple-950/20"
-                              >
-                                <div className="flex items-start gap-2">
-                                  <Upload className="h-4 w-4 text-blue-500 mt-0.5 shrink-0" />
-                                  <span className="text-sm">{prompt}</span>
-                                </div>
-                              </motion.button>
-                            ))}
                           </div>
                         </div>
-                      )}
-                    </div>
-                  </motion.div>
-                )}
-
-                {/* Messages */}
-                <div className="space-y-4 p-4">
-                  <AnimatePresence mode="popLayout">
-                    {messages.map((message, index) => (
-                      <ChatMessage
-                        key={message.id}
-                        message={message}
-                        index={index}
-                        showTimestamp={chatSettings.showTimestamps}
-                        compactMode={chatSettings.compactMode}
-                        isLastMessage={index === messages.length - 1}
-                      />
-                    ))}
-                  </AnimatePresence>
-
-                  {/* Loading indicator */}
-                  {isLoading && (
-                    <motion.div
-                      initial={{ opacity: 0, y: 20 }}
-                      animate={{ opacity: 1, y: 0 }}
-                      className="flex items-start gap-3 p-4"
-                    >
-                      <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-gradient-to-br from-emerald-500 to-blue-600 text-white">
-                        <Bot className="h-4 w-4" />
-                      </div>
-                      <div className="flex-1">
-                        <LoadingDots />
-                      </div>
-                    </motion.div>
-                  )}
-
-                  {/* Error display with retry option */}
-                  {error && (
-                    <motion.div
-                      initial={{ opacity: 0, y: 20 }}
-                      animate={{ opacity: 1, y: 0 }}
-                      className="mx-4"
-                    >
-                      <Alert variant="destructive">
-                        <AlertTriangle className="h-4 w-4" />
-                        <AlertDescription className="flex items-center justify-between">
-                          <span>{error}</span>
-                          {retryCount < 3 && (
-                            <Button
-                              variant="outline"
-                              size="sm"
-                              onClick={retryLastMessage}
-                              className="ml-4"
-                            >
-                              <RefreshCw className="h-3 w-3 mr-1" />
-                              Retry ({3 - retryCount} left)
-                            </Button>
-                          )}
-                        </AlertDescription>
-                      </Alert>
-                    </motion.div>
-                  )}
-
-                  {/* Scroll anchor */}
-                  <div ref={messagesEndRef} />
-                </div>
-              </div>
-            </ScrollArea>
-          </div>
-
-          {/* Input Area */}
-          <div className="border-t border-border bg-background/80 backdrop-blur-sm">
-            <div className="max-w-4xl mx-auto p-4">
-              {/* Uploaded files display */}
-              {uploadedFiles.length > 0 && (
-                <div className="mb-4">
-                  <div className="flex items-center gap-2 mb-2">
-                    <Upload className="h-4 w-4 text-muted-foreground" />
-                    <span className="text-sm font-medium">Attached Files ({uploadedFiles.length})</span>
+                      ))
+                    ) : (
+                      <p className="text-sm text-muted-foreground text-center py-8">
+                        {searchQuery ? 'No conversations found' : 'No conversations yet'}
+                      </p>
+                    )}
                   </div>
-                  <div className="flex flex-wrap gap-2">
-                    {uploadedFiles.map((file) => (
-                      <motion.div
-                        key={file.id}
-                        initial={{ opacity: 0, scale: 0.8 }}
-                        animate={{ opacity: 1, scale: 1 }}
-                        exit={{ opacity: 0, scale: 0.8 }}
-                        className="flex items-center gap-2 px-3 py-2 bg-muted rounded-lg border"
-                      >
-                        <FileText className="h-4 w-4 text-blue-500" />
-                        <span className="text-sm font-medium truncate max-w-[150px]">
-                          {file.originalName}
-                        </span>
-                        <span className="text-xs text-muted-foreground">
-                          {(file.size / 1024).toFixed(1)}KB
-                        </span>
+                </ScrollArea>
+
+                {/* User Section */}
+                {user && (
+                  <div className="p-4 border-t border-border">
+                    <div className="flex items-center justify-between">
+                      <div className="flex items-center gap-3">
+                        <div className="user-avatar h-8 w-8 rounded-full flex items-center justify-center">
+                          <User className="h-4 w-4" />
+                        </div>
+                        <div>
+                          <p className="text-sm font-medium">{user.name}</p>
+                          <p className="text-xs text-muted-foreground">{user.email}</p>
+                        </div>
+                      </div>
+                      <div className="flex items-center gap-1">
                         <Button
                           variant="ghost"
                           size="icon"
-                          className="h-6 w-6"
-                          onClick={() => removeUploadedFile(file.id)}
+                          onClick={() => setShowSettings(true)}
                         >
-                          <X className="h-3 w-3" />
+                          <Settings className="h-4 w-4" />
                         </Button>
-                      </motion.div>
-                    ))}
+                        <Button
+                          variant="ghost"
+                          size="sm"
+                          onClick={logout}
+                          className="text-xs"
+                        >
+                          Logout
+                        </Button>
+                      </div>
+                    </div>
                   </div>
-                </div>
+                )}
+              </div>
+            </motion.div>
+          </>
+        )}
+      </AnimatePresence>
+
+      {/* Main Content */}
+      <div className="flex-1 flex flex-col">
+        {/* Enhanced Header */}
+        <div className="border-b border-border p-4">
+          <div className="flex items-center justify-between">
+            <div className="flex items-center gap-4">
+              {/* Mobile menu button */}
+              <Button
+                variant="ghost"
+                size="icon"
+                onClick={() => setShowSidebar(true)}
+                className="lg:hidden"
+              >
+                <Menu className="h-4 w-4" />
+              </Button>
+              
+              {/* Desktop sidebar toggle */}
+              <Button
+                variant="ghost"
+                size="icon"
+                onClick={() => setShowSidebar(!showSidebar)}
+                className="hidden lg:flex"
+              >
+                <Menu className="h-4 w-4" />
+              </Button>
+
+              {/* Home button */}
+              <Button
+                variant="ghost"
+                size="icon"
+                onClick={goToHome}
+                className="hover-lift"
+                title="Go to Home"
+              >
+                <Home className="h-4 w-4" />
+              </Button>
+
+              <div className="flex items-center gap-2">
+                <Logo size="sm" />
+                <h1 className="text-xl font-semibold">AI Chatbot Indonesia</h1>
+              </div>
+            </div>
+
+            <div className="flex items-center gap-2">
+              {/* Voice controls */}
+              {voiceRecognition.isSupported && (
+                <Button
+                  variant="ghost"
+                  size="icon"
+                  onClick={toggleVoiceInput}
+                  className={cn(
+                    "hover-lift",
+                    voiceRecognition.isListening && "text-red-500 animate-pulse"
+                  )}
+                  title={voiceRecognition.isListening ? "Stop listening" : "Start voice input"}
+                >
+                  {voiceRecognition.isListening ? (
+                    <MicOff className="h-4 w-4" />
+                  ) : (
+                    <Mic className="h-4 w-4" />
+                  )}
+                </Button>
               )}
 
-              {/* File upload area */}
-{!isGuest && (
-  <FileUpload
-                  onFilesSelected={handleFilesSelected} // Now expects File[]
-                  className="mb-0"
-                  maxFiles={5} selectedFiles={[]} onRemoveFile={function (index: number): void {
-                    throw new Error('Function not implemented.');
-                  } }  />
-)}
+              {/* Speech toggle */}
+              <Button
+                variant="ghost"
+                size="icon"
+                onClick={() => setSpeechEnabled(!speechEnabled)}
+                className={cn(
+                  "hover-lift",
+                  speechEnabled && "text-green-500"
+                )}
+                title={speechEnabled ? "Disable speech" : "Enable speech"}
+              >
+                {speechEnabled ? (
+                  <Volume2 className="h-4 w-4" />
+                ) : (
+                  <VolumeX className="h-4 w-4" />
+                )}
+              </Button>
 
-              {/* Code mode indicator */}
-              <AnimatePresence>
-                {isCodeMode && (
-                  <motion.div
-                    initial={{ opacity: 0, height: 0 }}
-                    animate={{ opacity: 1, height: 'auto' }}
-                    exit={{ opacity: 0, height: 0 }}
-                    className="mb-4"
+              {/* Upload button */}
+              <Button
+                variant="ghost"
+                size="icon"
+                onClick={() => setShowUpload(true)}
+                className="hover-lift"
+                title="Upload files"
+              >
+                <Upload className="h-4 w-4" />
+              </Button>
+
+              {/* Theme toggle */}
+              <ThemeToggle />
+
+              {/* Settings button */}
+              <Button
+                variant="ghost"
+                size="icon"
+                onClick={() => setShowSettings(true)}
+                className="hover-lift"
+                title="Settings"
+              >
+                <Settings className="h-4 w-4" />
+              </Button>
+            </div>
+          </div>
+        </div>
+
+        {/* Chat Content */}
+        <div className="flex-1 flex flex-col overflow-hidden">
+          {/* Messages */}
+          <ScrollArea className="flex-1 p-4">
+            {showWelcome && messages.length === 0 ? (
+              <div className="max-w-4xl mx-auto">
+                {/* Welcome Section */}
+                <div className="text-center mb-8">
+                  <div className="inline-flex items-center justify-center w-16 h-16 rounded-full bg-gradient-to-r from-emerald-500 to-blue-500 mb-4 floating-element">
+                    <Bot className="h-8 w-8 text-white" />
+                  </div>
+                  <h2 className="text-3xl font-bold mb-2 gradient-text">
+                    Welcome to AI Chatbot Indonesia
+                  </h2>
+                  <p className="text-muted-foreground text-lg">
+                    Your intelligent assistant for conversations, file analysis, and more
+                  </p>
+                </div>
+
+                {/* Trending Topics */}
+                {trendingTopics.length > 0 && (
+                  <div className="mb-8">
+                    <h3 className="text-xl font-semibold mb-4">🔥 Trending Topics</h3>
+                    <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+                      {trendingTopics.map((topic, index) => (
+                        <motion.div
+                          key={index}
+                          initial={{ opacity: 0, y: 20 }}
+                          animate={{ opacity: 1, y: 0 }}
+                          transition={{ delay: index * 0.1 }}
+                          onClick={() => handleTrendingClick(topic)}
+                          className="p-4 rounded-lg border border-border hover:border-primary/50 cursor-pointer transition-all trending-card"
+                        >
+                          <div className="flex items-center justify-between mb-2">
+                            <Badge variant="secondary">{topic.category}</Badge>
+                            <span className="text-xs text-muted-foreground">{topic.source}</span>
+                          </div>
+                          <h4 className="font-medium text-sm">{topic.title}</h4>
+                        </motion.div>
+                      ))}
+                    </div>
+                  </div>
+                )}
+
+                {/* Quick Actions */}
+                <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+                  <Button
+                    variant="outline"
+                    className="h-20 flex-col gap-2 hover-lift"
+                    onClick={() => sendMessage("Explain quantum computing in simple terms")}
                   >
-                    <div className="flex items-center gap-2 p-3 bg-blue-50 dark:bg-blue-950 rounded-lg border border-blue-200 dark:border-blue-800">
-                      <Bot className="h-4 w-4 text-blue-600" />
-                      <span className="text-sm font-medium text-blue-700 dark:text-blue-300">
-                        Code Mode Active
-                      </span>
+                    <Bot className="h-6 w-6" />
+                    <span className="text-sm">Ask AI</span>
+                  </Button>
+                  <Button
+                    variant="outline"
+                    className="h-20 flex-col gap-2 hover-lift"
+                    onClick={() => setShowUpload(true)}
+                  >
+                    <Upload className="h-6 w-6" />
+                    <span className="text-sm">Upload File</span>
+                  </Button>
+                  <Button
+                    variant="outline"
+                    className="h-20 flex-col gap-2 hover-lift"
+                    onClick={() => setIsCodeMode(true)}
+                  >
+                    <FileText className="h-6 w-6" />
+                    <span className="text-sm">Code Mode</span>
+                  </Button>
+                  <Button
+                    variant="outline"
+                    className="h-20 flex-col gap-2 hover-lift"
+                    onClick={() => sendMessage("What's the weather like today?")}
+                  >
+                    <Clock className="h-6 w-6" />
+                    <span className="text-sm">Quick Info</span>
+                  </Button>
+                </div>
+              </div>
+            ) : (
+              <div className="max-w-4xl mx-auto space-y-6">
+                {messages.map((message, index) => (
+                  <motion.div
+                    key={message.id}
+                    initial={{ opacity: 0, y: 20 }}
+                    animate={{ opacity: 1, y: 0 }}
+                    transition={{ duration: 0.3 }}
+                    className="chat-message-enter"
+                  >
+                    <ChatMessage
+                      message={message}
+                      index={index}
+                      isLastMessage={message.id === messages[messages.length - 1]?.id}
+                    />
+                  </motion.div>
+                ))}
+                
+                {/* Typing Indicator */}
+                {isTyping && <TypingIndicator />}
+                
+                <div ref={messagesEndRef} />
+              </div>
+            )}
+          </ScrollArea>
+
+          {/* Error Display */}
+          {error && (
+            <div className="p-4 border-t border-border">
+              <Alert variant="destructive">
+                <AlertTriangle className="h-4 w-4" />
+                <AlertDescription className="flex items-center justify-between">
+                  <span>{error}</span>
+                  <div className="flex gap-2">
+                    <Button
+                      size="sm"
+                      variant="outline"
+                      onClick={() => setError(null)}
+                    >
+                      Dismiss
+                    </Button>
+                    <Button
+                      size="sm"
+                      onClick={() => sendMessage(input)}
+                      disabled={retryCount >= 3}
+                    >
+                      <RefreshCw className="h-3 w-3 mr-1" />
+                      Retry ({retryCount}/3)
+                    </Button>
+                  </div>
+                </AlertDescription>
+              </Alert>
+            </div>
+          )}
+
+          {/* Enhanced Input Area */}
+          <div className="border-t border-border p-4">
+            <div className="max-w-4xl mx-auto">
+              <div className="relative">
+                {/* File Upload Area */}
+                {uploadedFiles.length > 0 && (
+                  <div className="mb-4 p-3 bg-muted/50 rounded-lg">
+                    <div className="flex items-center gap-2 mb-2">
+                      <Upload className="h-4 w-4" />
+                      <span className="text-sm font-medium">Attached Files:</span>
+                    </div>
+                    <div className="flex flex-wrap gap-2">
+                      {uploadedFiles.map((file) => (
+                        <div
+                          key={file.id}
+                          className="flex items-center gap-2 bg-background p-2 rounded border"
+                        >
+                          <FileText className="h-4 w-4" />
+                          <span className="text-sm">{file.name}</span>
+                          <Button
+                            size="icon"
+                            variant="ghost"
+                            className="h-4 w-4"
+                            onClick={() => setUploadedFiles(prev => 
+                              prev.filter(f => f.id !== file.id)
+                            )}
+                          >
+                            <X className="h-3 w-3" />
+                          </Button>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                )}
+
+                {/* Code Mode Indicator */}
+                {isCodeMode && (
+                  <div className="mb-2">
+                    <CodeMode
+                      isActive={isCodeMode}
+                      onToggle={() => setIsCodeMode(!isCodeMode)}
+                      onTemplateSelect={(template) => setInput(template + " ")}
+                    />
+                  </div>
+                )}
+
+                {/* Voice Recognition Indicator */}
+                {voiceRecognition.isListening && (
+                  <motion.div
+                    initial={{ opacity: 0, scale: 0.9 }}
+                    animate={{ opacity: 1, scale: 1 }}
+                    className="mb-2 p-2 bg-red-100 dark:bg-red-900/20 border border-red-200 dark:border-red-800 rounded-lg"
+                  >
+                    <div className="flex items-center gap-2 text-red-600 dark:text-red-400">
+                      <Mic className="h-4 w-4 animate-pulse" />
+                      <span className="text-sm">Listening... Speak now</span>
                       <Button
-                        variant="ghost"
                         size="sm"
-                        onClick={() => setIsCodeMode(false)}
-                        className="ml-auto h-6 text-blue-600"
+                        variant="ghost"
+                        onClick={toggleVoiceInput}
+                        className="ml-auto"
                       >
-                        <X className="h-3 w-3" />
+                        Stop
                       </Button>
                     </div>
                   </motion.div>
                 )}
-              </AnimatePresence>
 
-              {/* Main input area */}
-              <div className="flex items-end gap-3">
-                {/* Code mode toggle */}
-                <CodeMode
-                  isActive={isCodeMode}
-                  onToggle={() => setIsCodeMode(!isCodeMode)}
-                  onTemplateSelect={handleCodeTemplate}
-                />
-
-                {/* Input field */}
-                <div className="flex-1 relative">
-                  <Textarea
-                    ref={inputRef}
-                    value={input}
-                    onChange={(e) => setInput(e.target.value)}
-                    onKeyDown={handleKeyPress}
-                    placeholder={
-                      isCodeMode 
-                        ? "Describe the code you want to create..."
-                        : uploadedFiles.length > 0 
-                          ? "Ask about the uploaded files..."
-                          : "Type your message..."
-                    }
-                    disabled={isLoading}
-                    className={cn(
-                      "min-h-[60px] max-h-[200px] resize-none pr-12",
-                      isCodeMode && "border-blue-200 dark:border-blue-800"
+                {/* Main Input */}
+                <div className="flex gap-2 items-end">
+                  <div className="flex-1 relative">
+                    <Textarea
+                      ref={inputRef}
+                      value={input}
+                      onChange={(e) => setInput(e.target.value)}
+                      onKeyDown={(e) => {
+                        if (e.key === 'Enter' && !e.shiftKey) {
+                          e.preventDefault();
+                          sendMessage();
+                        }
+                      }}
+                      placeholder={
+                        voiceRecognition.isListening 
+                          ? "Listening..." 
+                          : isCodeMode 
+                            ? "Describe the code you want to create..."
+                            : "Type your message here..."
+                      }
+                      className="min-h-[60px] max-h-[200px] resize-none pr-12 chat-input"
+                      disabled={isLoading || voiceRecognition.isListening}
+                    />
+                    
+                    {/* Voice Input Button in Textarea */}
+                    {voiceRecognition.isSupported && (
+                      <Button
+                        type="button"
+                        size="icon"
+                        variant="ghost"
+                        className="absolute right-2 bottom-2 h-8 w-8"
+                        onClick={toggleVoiceInput}
+                        disabled={isLoading}
+                      >
+                        {voiceRecognition.isListening ? (
+                          <MicOff className="h-4 w-4 text-red-500" />
+                        ) : (
+                          <Mic className="h-4 w-4" />
+                        )}
+                      </Button>
                     )}
-                    rows={1}
-                  />
-                  
-                  {/* Character count */}
-                  <div className="absolute bottom-2 right-12 text-xs text-muted-foreground">
-                    {input.length}/2000
+                  </div>
+
+                  {/* Action Buttons */}
+                  <div className="flex gap-2">
+                    {/* Upload Button */}
+                    <Button
+                      type="button"
+                      size="icon"
+                      variant="outline"
+                      onClick={() => setShowUpload(true)}
+                      disabled={isLoading}
+                      className="hover-lift"
+                      title="Upload files"
+                    >
+                      <Upload className="h-4 w-4" />
+                    </Button>
+
+                    {/* Send Button */}
+                    <Button
+                      onClick={() => sendMessage()}
+                      disabled={isLoading || (!input.trim() && uploadedFiles.length === 0)}
+                      className="px-6 enhanced-button btn-send"
+                    >
+                      {isLoading ? (
+                        <Loader2 className="h-4 w-4 animate-spin" />
+                      ) : (
+                        <Send className="h-4 w-4" />
+                      )}
+                    </Button>
                   </div>
                 </div>
 
-                {/* Send button */}
-                <Button
-                  onClick={sendMessage}
-                  disabled={(!input.trim() && uploadedFiles.length === 0) || isLoading}
-                  size="icon"
-                  className="h-[60px] w-12 bg-gradient-to-r from-emerald-500 to-blue-500 hover:from-emerald-600 hover:to-blue-600 text-white"
-                >
-                  {isLoading ? (
-                    <div className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin" />
-                  ) : (
-                    <Send className="h-4 w-4" />
-                  )}
-                </Button>
-              </div>
-
-              {/* Usage indicator */}
-              <div className="flex items-center justify-between mt-3 text-xs text-muted-foreground">
-                <div className="flex items-center gap-4">
-                  {isAuthenticated ? (
-                    <>
-                      <span className="flex items-center gap-1">
-                        <MessageSquare className="h-3 w-3" />
-                        {usage.messageCount} messages today
+                {/* Input Help Text */}
+                <div className="flex items-center justify-between mt-2 text-xs text-muted-foreground">
+                  <div className="flex items-center gap-4">
+                    <span>Press Enter to send, Shift+Enter for new line</span>
+                    {usage && (
+                      <span>
+                        Messages: {usage.messageCount}/{usage.messageCount + (usage.remainingQuota || 0)}
                       </span>
-                      <span className="flex items-center gap-1">
-                        <Clock className="h-3 w-3" />
-                        {usage.remainingQuota} remaining
-                      </span>
-                    </>
-                  ) : (
-                    <span className="flex items-center gap-1">
-                      <AlertTriangle className="h-3 w-3" />
-                      Guest mode: {usage.remainingQuota} messages remaining today
-                    </span>
-                  )}
+                    )}
+                  </div>
+                  <div className="flex items-center gap-2">
+                    {voiceRecognition.isSupported && (
+                      <Badge variant="outline" className="text-xs">
+                        Voice supported
+                      </Badge>
+                    )}
+                    <Badge variant="outline" className="text-xs">
+                      AI powered
+                    </Badge>
+                  </div>
                 </div>
-                
-                <div className="flex items-center gap-2">
-                  {error && (
-                    <span className="text-red-500 flex items-center gap-1">
-                      <AlertTriangle className="h-3 w-3" />
-                      Error
-                    </span>
-                  )}
-                  {isLoading && (
-                    <span className="text-blue-500 flex items-center gap-1">
-                      <div className="w-3 h-3 border border-blue-500 border-t-transparent rounded-full animate-spin" />
-                      Thinking...
-                    </span>
-                  )}
-                  {!isLoading && !error && messages.length > 0 && (
-                    <span className="text-green-500 flex items-center gap-1">
-                      <CheckCircle className="h-3 w-3" />
-                      Ready
-                    </span>
-                  )}
-                </div>
-              </div>
-
-              {/* Keyboard shortcuts hint */}
-              <div className="mt-2 text-xs text-muted-foreground text-center">
-                Press <kbd className="px-1 py-0.5 bg-muted rounded text-xs">Enter</kbd> to send, 
-                <kbd className="px-1 py-0.5 bg-muted rounded text-xs ml-1">Shift+Enter</kbd> for new line
               </div>
             </div>
+          </div>
+        </div>
+      </div>
+
+      {/* Hidden File Input */}
+      <input
+        type="file"
+        ref={fileInputRef}
+        onChange={(e) => {
+          const files = Array.from(e.target.files || []);
+          if (files.length > 0) {
+            handleFileUpload(files);
+          }
+        }}
+        multiple
+        accept="image/*,audio/*,video/*,.pdf,.doc,.docx,.txt,.csv,.json"
+        className="hidden"
+      />
+
+      {/* Modals and Dialogs */}
+      
+      {/* File Upload Dialog */}
+      {showUpload && (
+        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
+          <motion.div
+            initial={{ opacity: 0, scale: 0.9 }}
+            animate={{ opacity: 1, scale: 1 }}
+            exit={{ opacity: 0, scale: 0.9 }}
+            className="bg-card border border-border rounded-lg p-6 w-full max-w-md"
+          >
+            <div className="flex items-center justify-between mb-4">
+              <h3 className="text-lg font-semibold">Upload Files</h3>
+              <Button
+                variant="ghost"
+                size="icon"
+                onClick={() => setShowUpload(false)}
+              >
+                <X className="h-4 w-4" />
+              </Button>
+            </div>
+            
+            <FileUpload
+              onUpload={handleFileUpload}
+              onCancel={() => setShowUpload(false)}
+              maxFiles={1}
+              maxSize={10 * 1024 * 1024} // 50MB
+              className="mb-4" onFilesSelected={function (files: File[]): void {
+                throw new Error('Function not implemented.');
+              } } selectedFiles={[]} onRemoveFile={function (index: number): void {
+                throw new Error('Function not implemented.');
+              } }            />
+            
+            <div className="flex gap-2 justify-end">
+              <Button
+                variant="outline"
+                onClick={() => setShowUpload(false)}
+              >
+                Cancel
+              </Button>
+              <Button
+                onClick={() => fileInputRef.current?.click()}
+              >
+                Choose Files
+              </Button>
+            </div>
+          </motion.div>
+        </div>
+      )}
+
+      {/* Settings Dialog */}
+      {showSettings && (
+        <SettingsDialog
+          isOpen={showSettings}
+          onClose={() => setShowSettings(false)}
+        />
+      )}
+
+      {/* Floating Action Button (Mobile) */}
+      <div className="fixed bottom-6 right-6 lg:hidden z-40">
+        <Button
+          onClick={() => setShowSidebar(true)}
+          size="icon"
+          className="h-14 w-14 rounded-full shadow-lg floating-element"
+        >
+          <MessageSquare className="h-6 w-6" />
+        </Button>
+      </div>
+
+      {/* Keyboard Shortcuts Help */}
+      <div className="fixed bottom-4 left-4 hidden lg:block">
+        <div className="bg-card border border-border rounded-lg p-3 shadow-lg">
+          <div className="text-xs text-muted-foreground space-y-1">
+            <div>Ctrl+N: New chat</div>
+            <div>Ctrl+/: Toggle sidebar</div>
+            <div>Ctrl+K: Search</div>
           </div>
         </div>
       </div>

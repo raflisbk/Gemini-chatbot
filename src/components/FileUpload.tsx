@@ -18,6 +18,8 @@ interface FileUploadProps {
   maxSize?: number; // in MB
   acceptedTypes?: string[];
   className?: string;
+  onUpload: (files: File[]) => void | Promise<void>;
+  onCancel: () => void;
 }
 
 // Enhanced default accepted types with better multimodal support
