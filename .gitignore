@@ -27,6 +27,7 @@ yarn-error.log*
 # local env files
 .env*.local
 .env
+.env.sentry-build-plugin
 
 # vercel
 .vercel
@@ -89,3 +90,5 @@ dist
 # Temporary folders
 tmp/
 temp/
+# Sentry Config File
+.env.sentry-build-plugin
