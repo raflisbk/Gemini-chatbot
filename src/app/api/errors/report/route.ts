@@ -31,6 +31,77 @@ const errorReportSchema = z.object({
 type ErrorReport = z.infer<typeof errorReportSchema>;
 
 // ========================================
+// UTILITY FUNCTIONS (NOT EXPORTED)
+// ========================================
+
+// Clean up old error reports (call this periodically)
+async function cleanupOldErrorReports(daysToKeep: number = 30): Promise<number> {
+  try {
+    const cutoffDate = new Date();
+    cutoffDate.setDate(cutoffDate.getDate() - daysToKeep);
+
+    // FIXED: Use correct table name with enhanced types
+    const { data, error } = await supabaseAdmin
+      .from('error_reports')
+      .delete()
+      .lt('timestamp', cutoffDate.toISOString())
+      .select('error_id');
+
+    if (error) {
+      console.error('Error cleanup failed:', error);
+      return 0;
+    }
+
+    const cleanedCount = data?.length || 0;
+    console.log(`🧹 Cleaned up ${cleanedCount} old error reports`);
+    
+    // Also clean up related cache entries
+    if (data && cleanedCount > 0) {
+      for (const report of data) {
+        await cacheManager.del(`error:${report.error_id}`, 'errors');
+      }
+    }
+    
+    return cleanedCount;
+  } catch (error) {
+    console.error('Error cleanup failed:', error);
+    return 0;
+  }
+}
+
+// Get error statistics from database
+async function getErrorStatistics(
+  startDate?: string, 
+  endDate?: string
+): Promise<any> {
+  try {
+    let query = supabaseAdmin
+      .from('error_reports')
+      .select('*');
+
+    if (startDate) {
+      query = query.gte('timestamp', startDate);
+    }
+    
+    if (endDate) {
+      query = query.lte('timestamp', endDate);
+    }
+
+    const { data, error } = await query.order('timestamp', { ascending: false });
+
+    if (error) {
+      console.error('Error fetching statistics:', error);
+      return null;
+    }
+
+    return data;
+  } catch (error) {
+    console.error('Error statistics failed:', error);
+    return null;
+  }
+}
+
+// ========================================
 // ERROR STORAGE
 // ========================================
 
@@ -112,7 +183,7 @@ async function checkForDuplicate(errorReport: ErrorReport): Promise<boolean> {
     const exists = await cacheManager.exists(cacheKey, 'errors');
     
     if (exists) {
-      // Increment duplicate count - FIXED: Use the new incr method
+      // Increment duplicate count
       const currentCount = await cacheManager.incr(`${cacheKey}:count`, 'errors');
       console.log(`Duplicate error count: ${currentCount} for ${errorReport.errorId}`);
       return true;
@@ -229,7 +300,7 @@ async function updateErrorStats(errorReport: ErrorReport): Promise<void> {
     const today = new Date().toISOString().split('T')[0];
     const hour = new Date().getHours();
 
-    // Update daily stats - FIXED: Use incr method
+    // Update daily stats
     await cacheManager.incr(`error_stats:daily:${today}`, 'errors');
     
     // Update hourly stats
@@ -279,7 +350,7 @@ async function checkErrorPatterns(errorReport: ErrorReport): Promise<void> {
       );
     }
 
-    // Increment and set TTL for pattern detection - FIXED: Use incr method
+    // Increment and set TTL for pattern detection
     await cacheManager.incr(`error_pattern:${errorType}:recent`, 'errors');
     
     // Set TTL if this is the first error in the window
@@ -298,7 +369,7 @@ async function checkErrorPatterns(errorReport: ErrorReport): Promise<void> {
 }
 
 // ========================================
-// API ROUTE HANDLER
+// API ROUTE HANDLERS (ONLY THESE SHOULD BE EXPORTED)
 // ========================================
 
 export async function POST(request: NextRequest): Promise<NextResponse> {
@@ -377,58 +448,24 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
     // }
 
     const { searchParams } = new URL(request.url);
-    const type = searchParams.get('type') || 'daily';
-    const date = searchParams.get('date') || new Date().toISOString().split('T')[0];
+    const type = searchParams.get('type') || 'summary';
+    const startDate = searchParams.get('startDate');
+    const endDate = searchParams.get('endDate');
 
-    let stats: Record<string, any> = {};
+    let stats: any = {};
 
-    if (type === 'daily') {
-      const dailyCount = await cacheManager.get<number>(`error_stats:daily:${date}`, 'errors') || 0;
-      stats = { date, count: dailyCount };
-    } else if (type === 'hourly') {
-      const hourlyStats: Record<string, number> = {};
-      for (let hour = 0; hour < 24; hour++) {
-        const count = await cacheManager.get<number>(`error_stats:hourly:${date}:${hour}`, 'errors') || 0;
-        hourlyStats[hour.toString()] = count;
-      }
-      stats = { date, hourly: hourlyStats };
-    } else if (type === 'critical') {
-      // Get critical errors from cache
-      const criticalErrors: any[] = [];
+    if (type === 'summary') {
+      // Get summary statistics
+      const today = new Date().toISOString().split('T')[0];
+      const dailyCount = await cacheManager.get<number>(`error_stats:daily:${today}`, 'errors') || 0;
       
-      try {
-        // This is a simplified implementation
-        // In a real scenario, you'd query the database with proper filtering
-        const { data, error } = await supabaseAdmin
-          .from('error_reports')
-          .select('id, error_id, message, timestamp, level, resolved')
-          .eq('level', 'error')
-          .eq('resolved', false)
-          .order('timestamp', { ascending: false })
-          .limit(10);
-
-        if (!error && data) {
-          criticalErrors.push(...data);
-        }
-      } catch (dbError) {
-        console.error('Failed to fetch critical errors from DB:', dbError);
-      }
-
-      stats = { 
-        critical_errors: criticalErrors,
-        count: criticalErrors.length 
-      };
-    } else if (type === 'patterns') {
-      // Get error patterns and alerts
-      const patterns: any[] = [];
-      
-      // This would require more sophisticated pattern detection
-      // For now, return a placeholder
       stats = {
-        patterns,
-        alerts: [],
-        message: 'Pattern detection data'
+        today: dailyCount,
+        // Add more summary stats as needed
       };
+    } else if (type === 'detailed') {
+      // Get detailed statistics from database
+      stats = await getErrorStatistics(startDate || undefined, endDate || undefined);
     }
 
     return NextResponse.json({
@@ -528,103 +565,3 @@ export async function DELETE(request: NextRequest): Promise<NextResponse> {
     );
   }
 }
-
-// ========================================
-// UTILITY FUNCTIONS
-// ========================================
-
-// Clean up old error reports (call this periodically)
-export async function cleanupOldErrorReports(daysToKeep: number = 30): Promise<number> {
-  try {
-    const cutoffDate = new Date();
-    cutoffDate.setDate(cutoffDate.getDate() - daysToKeep);
-
-    // FIXED: Use correct table name with enhanced types
-    const { data, error } = await supabaseAdmin
-      .from('error_reports')
-      .delete()
-      .lt('timestamp', cutoffDate.toISOString())
-      .select('error_id');
-
-    if (error) {
-      console.error('Error cleanup failed:', error);
-      return 0;
-    }
-
-    const cleanedCount = data?.length || 0;
-    console.log(`🧹 Cleaned up ${cleanedCount} old error reports`);
-    
-    // Also clean up related cache entries
-    if (data && cleanedCount > 0) {
-      for (const report of data) {
-        await cacheManager.del(`error:${report.error_id}`, 'errors');
-      }
-    }
-    
-    return cleanedCount;
-  } catch (error) {
-    console.error('Error cleanup failed:', error);
-    return 0;
-  }
-}
-
-// Get error statistics from database
-export async function getErrorStatistics(
-  startDate?: string, 
-  endDate?: string
-): Promise<any> {
-  try {
-    const start = startDate || new Date(Date.now() - 7 * 24 * 60 * 60 * 1000).toISOString();
-    const end = endDate || new Date().toISOString();
-
-    const { data, error } = await supabaseAdmin
-      .from('error_reports')
-      .select('level, timestamp, resolved')
-      .gte('timestamp', start)
-      .lte('timestamp', end);
-
-    if (error) {
-      console.error('Failed to fetch error statistics:', error);
-      return null;
-    }
-
-    // Process statistics
-    const stats = {
-      total: data?.length || 0,
-      by_level: {} as Record<string, number>,
-      resolved: 0,
-      unresolved: 0,
-      by_date: {} as Record<string, number>,
-    };
-
-    data?.forEach(report => {
-      // Count by level
-      stats.by_level[report.level] = (stats.by_level[report.level] || 0) + 1;
-      
-      // Count resolved/unresolved
-      if (report.resolved) {
-        stats.resolved++;
-      } else {
-        stats.unresolved++;
-      }
-      
-      // Count by date
-      const date = report.timestamp.split('T')[0];
-      stats.by_date[date] = (stats.by_date[date] || 0) + 1;
-    });
-
-    return stats;
-  } catch (error) {
-    console.error('Error statistics query failed:', error);
-    return null;
-  }
-}
-
-// Export helper functions for use in other modules
-export {
-  processErrorReport,
-  classifyErrorSeverity,
-  handleCriticalError,
-  updateErrorStats,
-  checkErrorPatterns,
-};
