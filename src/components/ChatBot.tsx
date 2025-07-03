@@ -704,7 +704,7 @@ export function ChatBot() {
 
               <div className="flex items-center gap-2">
                 <Logo size="sm" />
-                <h1 className="text-xl font-semibold">AI Chatbot Indonesia</h1>
+                <h1 className="text-xl font-semibold"></h1>
               </div>
             </div>
 
@@ -787,7 +787,7 @@ export function ChatBot() {
                     <Bot className="h-8 w-8 text-white" />
                   </div>
                   <h2 className="text-3xl font-bold mb-2 gradient-text">
-                    Welcome to AI Chatbot Indonesia
+                    Welcome
                   </h2>
                   <p className="text-muted-foreground text-lg">
                     Your intelligent assistant for conversations, file analysis, and more
