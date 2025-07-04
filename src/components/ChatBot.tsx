@@ -231,8 +231,9 @@ export function ChatBot() {
 
   // Load chat sessions
   const loadChatSessions = useCallback(async () => {
+    if (!user?.id) return;
     try {
-      const sessions = await ChatStorage.getSessions(user?.id);
+      const sessions = await ChatStorage.getSessions(user.id);
       setChatSessions(sessions);
     } catch (error) {
       console.error('Error loading chat sessions:', error);
@@ -284,18 +285,32 @@ export function ChatBot() {
   }, [isLoading]);
 
   // Start new chat
-  const startNewChat = useCallback(() => {
-    const newSession = ChatStorage.createNewSession(undefined, user?.id);
-    setCurrentSessionId(newSession.id);
-    setMessages([]);
-    setUploadedFiles([]);
-    setShowWelcome(true);
-    setError(null);
-    setRetryCount(0);
-    
-    // Save empty session
-    ChatStorage.saveSession(newSession, user?.id);
-    loadChatSessions();
+  const startNewChat = useCallback(async () => {
+    if (!user?.id) return;
+    const title = "New Chat";
+    const newSession = await ChatStorage.createNewSession(user.id, title);
+    if (newSession && newSession.id) {
+      setCurrentSessionId(newSession.id);
+      setMessages([]);
+      setUploadedFiles([]);
+      setShowWelcome(true);
+      setError(null);
+      setRetryCount(0);
+
+      // Save empty session
+      ChatStorage.saveSession(
+        {
+          id: newSession.id,
+          title,
+          messages: [],
+          userId: user.id,
+          createdAt: new Date(),
+          updatedAt: new Date(),
+        },
+        user.id
+      );
+      loadChatSessions();
+    }
   }, [user?.id, loadChatSessions]);
 
   // Go to home

@@ -1,6 +1,6 @@
+// src/components/ui/alert.tsx
 import * as React from "react"
 import { cva, type VariantProps } from "class-variance-authority"
-
 import { cn } from "@/lib/utils"
 
 const alertVariants = cva(
@@ -11,12 +11,6 @@ const alertVariants = cva(
         default: "bg-background text-foreground",
         destructive:
           "border-destructive/50 text-destructive dark:border-destructive [&>svg]:text-destructive",
-        warning:
-          "border-yellow-500/50 text-yellow-800 bg-yellow-50 dark:border-yellow-500 dark:text-yellow-100 dark:bg-yellow-950 [&>svg]:text-yellow-600 dark:[&>svg]:text-yellow-400",
-        success:
-          "border-emerald-500/50 text-emerald-800 bg-emerald-50 dark:border-emerald-500 dark:text-emerald-100 dark:bg-emerald-950 [&>svg]:text-emerald-600 dark:[&>svg]:text-emerald-400",
-        info:
-          "border-blue-500/50 text-blue-800 bg-blue-50 dark:border-blue-500 dark:text-blue-100 dark:bg-blue-950 [&>svg]:text-blue-600 dark:[&>svg]:text-blue-400",
       },
     },
     defaultVariants: {

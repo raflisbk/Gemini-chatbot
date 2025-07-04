@@ -1,335 +1,483 @@
-import { put, del, list, head } from '@vercel/blob';
-import { supabase, supabaseAdmin } from './supabase';
-import type { FileAttachmentInsert } from './supabase';
-import crypto from 'crypto';
+// src/lib/storage.ts - FIXED VERSION
+import { put, del } from '@vercel/blob';
+import { supabaseAdmin, createFileAttachment } from './supabase';
 
-const BLOB_TOKEN = process.env.BLOB_READ_WRITE_TOKEN!;
-
-if (!BLOB_TOKEN) {
-  throw new Error('BLOB_READ_WRITE_TOKEN environment variable is required');
-}
+// ========================================
+// INTERFACES
+// ========================================
 
 export interface UploadResult {
   success: boolean;
   file?: {
     id: string;
-    filename: string;
-    originalName: string;
+    name: string;
     url: string;
-    size: number;
     mimeType: string;
+    size: number;
+    base64?: string;
   };
   error?: string;
 }
 
-export interface FileValidation {
-  isValid: boolean;
-  errors: string[];
+export interface StorageQuotaInfo {
+  isOverQuota: boolean;
+  currentUsage: number;
+  totalSize: number;
+  limit: number;
+  remainingStorage: number;
 }
 
-// File validation constants
-const MAX_FILE_SIZE = 50 * 1024 * 1024; // 50MB
+// ========================================
+// CONSTANTS
+// ========================================
+
+const MAX_FILE_SIZE = 10 * 1024 * 1024; // 10MB
 const ALLOWED_MIME_TYPES = [
   // Images
-  'image/jpeg', 'image/jpg', 'image/png', 'image/gif', 'image/webp', 'image/svg+xml',
-  // Documents
-  'application/pdf', 'text/plain', 'text/markdown', 'text/csv',
-  'application/msword', 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
-  'application/vnd.ms-excel', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
-  'application/vnd.ms-powerpoint', 'application/vnd.openxmlformats-officedocument.presentationml.presentation',
-  // Code files
-  'text/javascript', 'application/javascript', 'text/typescript', 'application/typescript',
-  'text/html', 'text/css', 'application/json', 'text/xml', 'application/xml',
-  'text/x-python', 'text/x-java-source', 'text/x-c', 'text/x-c++src',
+  'image/jpeg', 'image/png', 'image/gif', 'image/webp', 'image/svg+xml',
   // Audio
-  'audio/mpeg', 'audio/wav', 'audio/ogg', 'audio/mp4', 'audio/aac',
+  'audio/mpeg', 'audio/wav', 'audio/ogg', 'audio/mp4', 'audio/webm',
   // Video
-  'video/mp4', 'video/avi', 'video/quicktime', 'video/webm',
-  // Archives
-  'application/zip', 'application/x-rar-compressed', 'application/x-7z-compressed'
+  'video/mp4', 'video/webm', 'video/quicktime', 'video/x-msvideo',
+  // Documents
+  'application/pdf', 'text/plain', 'text/csv', 'text/markdown',
+  'application/json', 'application/xml', 'text/xml',
+  // Office documents
+  'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+  'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+  'application/vnd.openxmlformats-officedocument.presentationml.presentation',
 ];
 
-const DANGEROUS_EXTENSIONS = [
-  '.exe', '.bat', '.cmd', '.com', '.scr', '.vbs', '.ps1', '.msi', 
-  '.deb', '.rpm', '.dmg', '.app', '.jar', '.sh', '.run'
-];
+// ========================================
+// HELPER FUNCTIONS
+// ========================================
 
-// Validate file before upload
-export const validateFile = (file: File): FileValidation => {
-  const errors: string[] = [];
+function generateSafeFileName(originalName: string): string {
+  const timestamp = Date.now();
+  const randomString = Math.random().toString(36).substring(2, 15);
+  const extension = originalName.split('.').pop() || '';
+  const baseName = originalName.replace(/[^a-zA-Z0-9.-]/g, '_').substring(0, 50);
+  
+  return `${timestamp}_${randomString}_${baseName}${extension ? '.' + extension : ''}`;
+}
 
+async function convertFileToBase64(file: File): Promise<string> {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => {
+      const base64String = reader.result as string;
+      // Remove data URL prefix (data:image/jpeg;base64,)
+      const base64Data = base64String.split(',')[1];
+      resolve(base64Data);
+    };
+    reader.onerror = reject;
+    reader.readAsDataURL(file);
+  });
+}
+
+function validateFile(file: File): { isValid: boolean; error?: string } {
   // Check file size
   if (file.size > MAX_FILE_SIZE) {
-    errors.push(`File size must be less than ${Math.round(MAX_FILE_SIZE / 1024 / 1024)}MB`);
+    return { 
+      isValid: false, 
+      error: `File size exceeds 10MB limit. Current size: ${(file.size / 1024 / 1024).toFixed(2)}MB` 
+    };
   }
 
   // Check MIME type
-  if (!ALLOWED_MIME_TYPES.includes(file.type.toLowerCase())) {
-    errors.push(`File type ${file.type} is not allowed`);
+  if (!ALLOWED_MIME_TYPES.includes(file.type)) {
+    return { 
+      isValid: false, 
+      error: `File type '${file.type}' is not supported` 
+    };
   }
 
-  // Check dangerous extensions
-  const fileName = file.name.toLowerCase();
-  const hasDangerousExtension = DANGEROUS_EXTENSIONS.some(ext => fileName.endsWith(ext));
-  if (hasDangerousExtension) {
-    errors.push('This file type is not allowed for security reasons');
+  // Check file name
+  if (!file.name || file.name.length < 1) {
+    return { 
+      isValid: false, 
+      error: 'File name is required' 
+    };
   }
 
-  // Check if file has an extension
-  if (!fileName.includes('.')) {
-    errors.push('File must have an extension');
+  return { isValid: true };
+}
+
+// ========================================
+// STORAGE QUOTA MANAGEMENT
+// ========================================
+
+export async function checkStorageQuota(userId: string, fileSize: number): Promise<StorageQuotaInfo> {
+  try {
+    // Get user's current storage usage
+    const { data: usage, error } = await supabaseAdmin
+      .from('usage_tracking')
+      .select('storage_used')
+      .eq('user_id', userId)
+      .single();
+
+    if (error && error.code !== 'PGRST116') { // PGRST116 = no rows found
+      throw error;
+    }
+
+    const currentUsage = usage?.storage_used || 0;
+    const totalAfterUpload = currentUsage + fileSize;
+    
+    // Storage limits (in bytes)
+    const STORAGE_LIMITS = {
+      admin: 5 * 1024 * 1024 * 1024, // 5GB
+      user: 1 * 1024 * 1024 * 1024,  // 1GB
+      guest: 50 * 1024 * 1024        // 50MB
+    };
+
+    // Get user role
+    const { data: user, error: userError } = await supabaseAdmin
+      .from('users')
+      .select('role')
+      .eq('id', userId)
+      .single();
+
+    if (userError) {
+      throw userError;
+    }
+
+    const userRole = user?.role as keyof typeof STORAGE_LIMITS || 'user';
+    const limit = STORAGE_LIMITS[userRole] || STORAGE_LIMITS.user;
+
+    return {
+      isOverQuota: totalAfterUpload > limit,
+      currentUsage,
+      totalSize: totalAfterUpload,
+      limit,
+      remainingStorage: limit - currentUsage
+    };
+  } catch (error) {
+    console.error('Storage quota check error:', error);
+    return { 
+      isOverQuota: false, 
+      currentUsage: 0, 
+      totalSize: fileSize, 
+      limit: 1024 * 1024 * 1024, 
+      remainingStorage: 1024 * 1024 * 1024 
+    };
   }
+}
 
-  return {
-    isValid: errors.length === 0,
-    errors
-  };
-};
+async function updateStorageUsage(userId: string, fileSize: number): Promise<void> {
+  try {
+    const today = new Date().toISOString().split('T')[0];
+    
+    // Get or create usage record
+    const { data: existing, error: fetchError } = await supabaseAdmin
+      .from('usage_tracking')
+      .select('*')
+      .eq('user_id', userId)
+      .eq('date', today)
+      .single();
 
-// Generate secure filename
-export const generateSecureFilename = (originalName: string, userId: string): string => {
-  const timestamp = Date.now();
-  const random = crypto.randomBytes(8).toString('hex');
-  const extension = originalName.substring(originalName.lastIndexOf('.'));
-  const sanitizedName = originalName
-    .substring(0, originalName.lastIndexOf('.'))
-    .replace(/[^a-zA-Z0-9]/g, '_')
-    .substring(0, 50);
-  
-  return `${userId}/${timestamp}_${random}_${sanitizedName}${extension}`;
-};
+    if (fetchError && fetchError.code !== 'PGRST116') {
+      throw fetchError;
+    }
 
-// Upload file to Vercel Blob
-export const uploadFile = async (
+    if (existing) {
+      // Update existing record
+      await supabaseAdmin
+        .from('usage_tracking')
+        .update({
+          storage_used: (existing.storage_used || 0) + fileSize,
+          file_uploads: (existing.file_uploads || 0) + 1
+        })
+        .eq('id', existing.id);
+    } else {
+      // Create new record
+      await supabaseAdmin
+        .from('usage_tracking')
+        .insert({
+          user_id: userId,
+          date: today,
+          storage_used: fileSize,
+          file_uploads: 1,
+          message_count: 0,
+          tokens_used: 0
+        });
+    }
+  } catch (error) {
+    console.error('Storage usage update error:', error);
+    throw error;
+  }
+}
+
+// ========================================
+// MAIN UPLOAD FUNCTIONS
+// ========================================
+
+export async function uploadFile(
   file: File, 
   userId: string, 
   messageId?: string
-): Promise<UploadResult> => {
+): Promise<UploadResult> {
   try {
     // Validate file
     const validation = validateFile(file);
     if (!validation.isValid) {
-      return {
-        success: false,
-        error: validation.errors.join(', ')
+      return { success: false, error: validation.error };
+    }
+
+    // Check storage quota
+    const quotaCheck = await checkStorageQuota(userId, file.size);
+    if (quotaCheck.isOverQuota) {
+      return { 
+        success: false, 
+        error: `Storage quota exceeded. ${(quotaCheck.remainingStorage / 1024 / 1024).toFixed(2)}MB remaining.`
       };
     }
 
-    // Generate secure filename
-    const secureFilename = generateSecureFilename(file.name, userId);
+    // Generate safe file name
+    const safeFileName = generateSafeFileName(file.name);
+
+    // Convert to base64 for AI processing
+    const base64Data = await convertFileToBase64(file);
 
     // Upload to Vercel Blob
-    const blob = await put(secureFilename, file, {
+    const { url } = await put(safeFileName, file, {
       access: 'public',
-      token: BLOB_TOKEN,
     });
 
     // Save file metadata to database
-    const fileData: FileAttachmentInsert = {
+    const fileRecord = await createFileAttachment({
+      message_id: messageId,
       user_id: userId,
-      message_id: messageId || null,
-      filename: secureFilename,
+      filename: safeFileName,
       original_name: file.name,
-      file_size: file.size,
+      file_path: url,
+      blob_url: url,
       mime_type: file.type,
-      blob_url: blob.url,
-      metadata: {
-        downloadUrl: blob.downloadUrl,
-        pathname: blob.pathname,
-        contentType: blob.contentType,
-        contentDisposition: blob.contentDisposition,
-      }
-    };
+      file_size: file.size,
+      processing_status: 'completed',
+      ai_analysis: {}
+    });
 
-    const { data: savedFile, error } = await supabaseAdmin
-      .from('file_attachments')
-      .insert(fileData)
-      .select()
-      .single();
-
-    if (error) {
-      // If database save fails, delete the blob
-      await deleteFile(blob.url, userId);
-      return {
-        success: false,
-        error: 'Failed to save file metadata'
-      };
+    if (!fileRecord) {
+      return { success: false, error: 'Failed to save file metadata' };
     }
+
+    // Update storage usage
+    await updateStorageUsage(userId, file.size);
 
     return {
       success: true,
       file: {
-        id: savedFile.id,
-        filename: savedFile.filename,
-        originalName: savedFile.original_name,
-        url: savedFile.blob_url,
-        size: savedFile.file_size,
-        mimeType: savedFile.mime_type,
+        id: fileRecord.id,
+        name: fileRecord.original_name,
+        url: fileRecord.blob_url || url,
+        mimeType: fileRecord.mime_type,
+        size: fileRecord.file_size,
+        base64: base64Data
       }
     };
 
   } catch (error) {
     console.error('File upload error:', error);
-    return {
-      success: false,
-      error: 'Failed to upload file'
+    return { 
+      success: false, 
+      error: error instanceof Error ? error.message : 'Unknown upload error'
     };
   }
-};
+}
 
-// Upload multiple files
-export const uploadFiles = async (
+export async function uploadFiles(
   files: File[], 
   userId: string, 
   messageId?: string
-): Promise<{ successes: UploadResult[]; failures: UploadResult[] }> => {
-  const results = await Promise.allSettled(
-    files.map(file => uploadFile(file, userId, messageId))
-  );
-
+): Promise<{
+  successes: UploadResult[];
+  failures: UploadResult[];
+}> {
   const successes: UploadResult[] = [];
   const failures: UploadResult[] = [];
 
-  results.forEach((result, index) => {
-    if (result.status === 'fulfilled') {
-      if (result.value.success) {
-        successes.push(result.value);
-      } else {
-        failures.push(result.value);
-      }
+  for (const file of files) {
+    const result = await uploadFile(file, userId, messageId);
+    if (result.success) {
+      successes.push(result);
     } else {
-      failures.push({
-        success: false,
-        error: `Failed to upload ${files[index].name}: ${result.reason}`
-      });
+      failures.push(result);
     }
-  });
+  }
 
   return { successes, failures };
-};
+}
 
-// Delete file from blob and database
-export const deleteFile = async (urlOrId: string, userId: string): Promise<boolean> => {
+// ========================================
+// FILE MANAGEMENT FUNCTIONS
+// ========================================
+
+export async function deleteFile(fileId: string, userId: string): Promise<boolean> {
   try {
-    let fileRecord;
+    // Get file info from database
+    const { data: fileRecord, error: fetchError } = await supabaseAdmin
+      .from('file_attachments')
+      .select('*')
+      .eq('id', fileId)
+      .eq('user_id', userId)
+      .single();
 
-    // Check if it's a URL or ID
-    if (urlOrId.startsWith('http')) {
-      // It's a URL, find by blob_url
-      const { data } = await supabaseAdmin
-        .from('file_attachments')
-        .select('*')
-        .eq('blob_url', urlOrId)
-        .eq('user_id', userId)
-        .single();
-      fileRecord = data;
-    } else {
-      // It's an ID
-      const { data } = await supabaseAdmin
-        .from('file_attachments')
-        .select('*')
-        .eq('id', urlOrId)
-        .eq('user_id', userId)
-        .single();
-      fileRecord = data;
-    }
-
-    if (!fileRecord) {
+    if (fetchError || !fileRecord) {
+      console.error('File not found:', fetchError);
       return false;
     }
 
-    // Delete from blob storage
-    await del(fileRecord.blob_url, { token: BLOB_TOKEN });
+    // Delete from Vercel Blob
+    if (fileRecord.blob_url) {
+      try {
+        await del(fileRecord.blob_url);
+      } catch (blobError) {
+        console.error('Error deleting from blob storage:', blobError);
+        // Continue with database deletion even if blob deletion fails
+      }
+    }
 
     // Delete from database
-    const { error } = await supabaseAdmin
+    const { error: deleteError } = await supabaseAdmin
       .from('file_attachments')
       .delete()
-      .eq('id', fileRecord.id);
+      .eq('id', fileId);
 
-    return !error;
+    if (deleteError) {
+      console.error('Error deleting file record:', deleteError);
+      return false;
+    }
+
+    // Update storage usage
+    try {
+      const today = new Date().toISOString().split('T')[0];
+      const { data: usage } = await supabaseAdmin
+        .from('usage_tracking')
+        .select('*')
+        .eq('user_id', userId)
+        .eq('date', today)
+        .single();
+
+      if (usage) {
+        await supabaseAdmin
+          .from('usage_tracking')
+          .update({
+            storage_used: Math.max(0, (usage.storage_used || 0) - fileRecord.file_size),
+            file_uploads: Math.max(0, (usage.file_uploads || 0) - 1)
+          })
+          .eq('id', usage.id);
+      }
+    } catch (usageError) {
+      console.error('Error updating usage after file deletion:', usageError);
+      // Don't fail the deletion if usage update fails
+    }
+
+    return true;
   } catch (error) {
-    console.error('File deletion error:', error);
+    console.error('Delete file error:', error);
     return false;
   }
-};
+}
 
-// Get file metadata
-export const getFileMetadata = async (fileId: string, userId: string) => {
-  const { data, error } = await supabase
-    .from('file_attachments')
-    .select('*')
-    .eq('id', fileId)
-    .eq('user_id', userId)
-    .single();
+export async function getFileMetadata(fileId: string, userId: string): Promise<any> {
+  try {
+    const { data: fileRecord, error } = await supabaseAdmin
+      .from('file_attachments')
+      .select('*')
+      .eq('id', fileId)
+      .eq('user_id', userId)
+      .single();
 
-  if (error || !data) {
+    if (error) {
+      console.error('Error getting file metadata:', error);
+      return null;
+    }
+
+    return fileRecord;
+  } catch (error) {
+    console.error('Exception in getFileMetadata:', error);
     return null;
   }
+}
 
-  return data;
-};
+export async function getUserFiles(userId: string, limit: number = 50): Promise<any[]> {
+  try {
+    const { data: files, error } = await supabaseAdmin
+      .from('file_attachments')
+      .select('*')
+      .eq('user_id', userId)
+      .order('created_at', { ascending: false })
+      .limit(limit);
 
-// List user files with pagination
-export const getUserFiles = async (
-  userId: string, 
-  page: number = 1, 
-  limit: number = 20
-) => {
-  const offset = (page - 1) * limit;
+    if (error) {
+      console.error('Error getting user files:', error);
+      return [];
+    }
 
-  const { data, error, count } = await supabase
-    .from('file_attachments')
-    .select('*', { count: 'exact' })
-    .eq('user_id', userId)
-    .order('uploaded_at', { ascending: false })
-    .range(offset, offset + limit - 1);
-
-  if (error) {
-    return { files: [], total: 0, page, limit };
+    return files || [];
+  } catch (error) {
+    console.error('Exception in getUserFiles:', error);
+    return [];
   }
+}
 
-  return {
-    files: data || [],
-    total: count || 0,
-    page,
-    limit,
-    totalPages: Math.ceil((count || 0) / limit)
-  };
-};
+// ========================================
+// UTILITY FUNCTIONS
+// ========================================
 
-// Get storage usage for user
-export const getUserStorageUsage = async (userId: string) => {
-  const { data, error } = await supabase
-    .from('file_attachments')
-    .select('file_size')
-    .eq('user_id', userId);
+export function formatFileSize(bytes: number): string {
+  if (bytes === 0) return '0 Bytes';
+  const k = 1024;
+  const sizes = ['Bytes', 'KB', 'MB', 'GB'];
+  const i = Math.floor(Math.log(bytes) / Math.log(k));
+  return parseFloat((bytes / Math.pow(k, i)).toFixed(2)) + ' ' + sizes[i];
+}
 
-  if (error || !data) {
-    return { totalSize: 0, fileCount: 0 };
-  }
-
-  const totalSize = data.reduce((sum, file) => sum + file.file_size, 0);
+export function getFileCategory(file: File): string {
+  const type = file.type.toLowerCase();
   
-  return {
-    totalSize,
-    fileCount: data.length,
-    totalSizeMB: Math.round(totalSize / 1024 / 1024 * 100) / 100
-  };
-};
+  if (type.startsWith('image/')) return 'image';
+  if (type.startsWith('audio/')) return 'audio';
+  if (type.startsWith('video/')) return 'video';
+  if (type.includes('pdf')) return 'document';
+  if (type.includes('text/') || type.includes('json') || type.includes('csv')) return 'text';
+  if (type.includes('zip') || type.includes('rar') || type.includes('7z')) return 'archive';
+  
+  return 'other';
+}
 
-// Check if user has reached storage quota
-export const checkStorageQuota = async (userId: string, additionalSize: number = 0) => {
-  const STORAGE_QUOTA_MB = 500; // 500MB per user
-  const usage = await getUserStorageUsage(userId);
-  const totalSizeWithAddition = usage.totalSize + additionalSize;
-  const quotaBytes = STORAGE_QUOTA_MB * 1024 * 1024;
+export function getFileIcon(mimeType: string): string {
+  if (mimeType.startsWith('image/')) return '🖼️';
+  if (mimeType.startsWith('audio/')) return '🎵';
+  if (mimeType.startsWith('video/')) return '🎬';
+  if (mimeType.includes('pdf')) return '📄';
+  if (mimeType.includes('text/') || mimeType.includes('json')) return '📝';
+  if (mimeType.includes('zip') || mimeType.includes('rar')) return '📦';
+  return '📁';
+}
 
-  return {
-    currentUsageMB: usage.totalSizeMB ?? 0,
-    quotaMB: STORAGE_QUOTA_MB,
-    remainingMB: Math.max(0, STORAGE_QUOTA_MB - (usage.totalSizeMB ?? 0)),
-    isOverQuota: totalSizeWithAddition > quotaBytes,
-    usagePercentage: Math.round((totalSizeWithAddition / quotaBytes) * 100)
-  };
-};
+export function isImageFile(mimeType: string): boolean {
+  return mimeType.startsWith('image/');
+}
+
+export function isVideoFile(mimeType: string): boolean {
+  return mimeType.startsWith('video/');
+}
+
+export function isAudioFile(mimeType: string): boolean {
+  return mimeType.startsWith('audio/');
+}
+
+export function isDocumentFile(mimeType: string): boolean {
+  const documentTypes = [
+    'application/pdf',
+    'text/plain',
+    'text/csv',
+    'text/markdown',
+    'application/json',
+    'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+    'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+    'application/vnd.openxmlformats-officedocument.presentationml.presentation'
+  ];
+  return documentTypes.includes(mimeType);
+}

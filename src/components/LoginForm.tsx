@@ -1,254 +1,345 @@
+// src/components/LoginForm.tsx
 'use client';
 
-import { useState } from 'react';
-import { motion, AnimatePresence } from 'framer-motion';
-import { X, Eye, EyeOff, LogIn, Mail, Lock, AlertCircle, Shield } from 'lucide-react';
+import React, { useState, useEffect } from 'react';
+import { useAuth } from '@/context/AuthContext';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
-import { Logo } from '@/components/Logo';
-import { useAuth } from '@/context/AuthContext';
+import { Label } from '@/components/ui/label';
+import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
+import { Alert, AlertDescription } from '@/components/ui/alert';
+import { Eye, EyeOff, Lock, Mail, AlertCircle, CheckCircle, Loader2 } from 'lucide-react';
+import { motion, AnimatePresence } from 'framer-motion';
 
 interface LoginFormProps {
-  isOpen: boolean;
-  onClose: () => void;
+  onSuccess?: () => void;
+  onCancel?: () => void;
+  showGuestOption?: boolean;
 }
 
-export function LoginForm({ isOpen, onClose }: LoginFormProps) {
+export const LoginForm: React.FC<LoginFormProps> = ({ 
+  onSuccess, 
+  onCancel, 
+  showGuestOption = true 
+}) => {
+  // Auth context
+  const { login, isLoading, error, initializeGuest } = useAuth();
+  
+  // Form state
+  const [email, setEmail] = useState('');
+  const [password, setPassword] = useState('');
   const [showPassword, setShowPassword] = useState(false);
-  const [formData, setFormData] = useState({
-    email: '',
-    password: ''
-  });
-  const [isLoading, setIsLoading] = useState(false);
-  const [error, setError] = useState('');
+  const [isSubmitting, setIsSubmitting] = useState(false);
+  const [validationErrors, setValidationErrors] = useState<Record<string, string>>({});
 
-  const { login } = useAuth();
+  // Demo credentials state
+  const [showDemoCredentials, setShowDemoCredentials] = useState(false);
+
+  // ========================================
+  // FORM VALIDATION
+  // ========================================
+
+  const validateForm = (): boolean => {
+    const errors: Record<string, string> = {};
+
+    if (!email.trim()) {
+      errors.email = 'Email is required';
+    } else if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
+      errors.email = 'Please enter a valid email address';
+    }
+
+    if (!password.trim()) {
+      errors.password = 'Password is required';
+    } else if (password.length < 6) {
+      errors.password = 'Password must be at least 6 characters';
+    }
+
+    setValidationErrors(errors);
+    return Object.keys(errors).length === 0;
+  };
+
+  // ========================================
+  // FORM HANDLERS
+  // ========================================
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    setError('');
-    setIsLoading(true);
+    
+    if (!validateForm()) return;
 
+    setIsSubmitting(true);
+    
     try {
-      await login(formData.email, formData.password);
-      onClose();
-      resetForm();
-    } catch (err) {
-      setError(err instanceof Error ? err.message : 'Invalid email or password');
+      const success = await login(email.trim(), password);
+      
+      if (success) {
+        onSuccess?.();
+      }
+    } catch (error) {
+      console.error('Login submission error:', error);
     } finally {
-      setIsLoading(false);
+      setIsSubmitting(false);
     }
   };
 
-  const handleInputChange = (field: string, value: string) => {
-    setFormData(prev => ({ ...prev, [field]: value }));
-    if (error) setError(''); // Clear error when user starts typing
+  const handleGuestAccess = async () => {
+    setIsSubmitting(true);
+    try {
+      await initializeGuest();
+      onSuccess?.();
+    } catch (error) {
+      console.error('Guest access error:', error);
+    } finally {
+      setIsSubmitting(false);
+    }
   };
 
-  const resetForm = () => {
-    setFormData({ email: '', password: '' });
-    setError('');
-    setShowPassword(false);
+  const handleDemoLogin = (demoEmail: string, demoPassword: string) => {
+    setEmail(demoEmail);
+    setPassword(demoPassword);
+    setShowDemoCredentials(false);
   };
 
-  const handleClose = () => {
-    resetForm();
-    onClose();
-  };
+  // ========================================
+  // EFFECTS
+  // ========================================
+
+  useEffect(() => {
+    // Clear validation errors when fields change
+    if (email && validationErrors.email) {
+      setValidationErrors(prev => ({ ...prev, email: '' }));
+    }
+    if (password && validationErrors.password) {
+      setValidationErrors(prev => ({ ...prev, password: '' }));
+    }
+  }, [email, password, validationErrors]);
+
+  // ========================================
+  // RENDER
+  // ========================================
 
   return (
-    <AnimatePresence>
-      {isOpen && (
+    <div className="min-h-screen flex items-center justify-center bg-gradient-to-br from-blue-50 to-indigo-100 p-4">
+      <motion.div
+        initial={{ opacity: 0, y: 20 }}
+        animate={{ opacity: 1, y: 0 }}
+        transition={{ duration: 0.5 }}
+        className="w-full max-w-md"
+      >
+        <Card className="shadow-2xl border-0 bg-white/80 backdrop-blur-sm">
+          <CardHeader className="space-y-1 text-center">
+            <motion.div
+              initial={{ scale: 0.8 }}
+              animate={{ scale: 1 }}
+              transition={{ delay: 0.2 }}
+              className="mx-auto w-16 h-16 bg-gradient-to-br from-blue-500 to-indigo-600 rounded-full flex items-center justify-center mb-4"
+            >
+              <Lock className="w-8 h-8 text-white" />
+            </motion.div>
+            
+            <CardTitle className="text-2xl font-bold text-gray-900">
+              Welcome Back
+            </CardTitle>
+            <CardDescription className="text-gray-600">
+              Sign in to your AI Chatbot account
+            </CardDescription>
+          </CardHeader>
+
+          <CardContent className="space-y-6">
+            {/* Error Alert */}
+            <AnimatePresence>
+              {error && (
+                <motion.div
+                  initial={{ opacity: 0, height: 0 }}
+                  animate={{ opacity: 1, height: 'auto' }}
+                  exit={{ opacity: 0, height: 0 }}
+                  transition={{ duration: 0.3 }}
+                >
+                  <Alert className="border-red-200 bg-red-50">
+                    <AlertCircle className="h-4 w-4 text-red-600" />
+                    <AlertDescription className="text-red-800">
+                      {error}
+                    </AlertDescription>
+                  </Alert>
+                </motion.div>
+              )}
+            </AnimatePresence>
+
+            {/* Demo Credentials */}
+            <AnimatePresence>
+              {showDemoCredentials && (
+                <motion.div
+                  initial={{ opacity: 0, height: 0 }}
+                  animate={{ opacity: 1, height: 'auto' }}
+                  exit={{ opacity: 0, height: 0 }}
+                  className="bg-blue-50 rounded-lg p-4 border border-blue-200"
+                >
+                  <h4 className="font-semibold text-blue-900 mb-3">Demo Credentials</h4>
+                  <div className="space-y-2 text-sm">
+                    <div className="flex justify-between items-center">
+                      <span className="text-blue-800">Admin:</span>
+                      <Button
+                        variant="outline"
+                        size="sm"
+                        onClick={() => handleDemoLogin('admin@chatbot.internal', 'admin123')}
+                        className="text-xs"
+                      >
+                        Use Admin
+                      </Button>
+                    </div>
+                    <div className="text-xs text-blue-600">
+                      admin@chatbot.internal / admin123
+                    </div>
+                  </div>
+                </motion.div>
+              )}
+            </AnimatePresence>
+
+            {/* Login Form */}
+            <form onSubmit={handleSubmit} className="space-y-4">
+              {/* Email Field */}
+              <div className="space-y-2">
+                <Label htmlFor="email" className="text-sm font-medium text-gray-700">
+                  Email Address
+                </Label>
+                <div className="relative">
+                  <Mail className="absolute left-3 top-3 h-4 w-4 text-gray-400" />
+                  <Input
+                    id="email"
+                    type="email"
+                    placeholder="Enter your email"
+                    value={email}
+                    onChange={(e) => setEmail(e.target.value)}
+                    className={`pl-10 h-12 ${validationErrors.email ? 'border-red-500' : ''}`}
+                    disabled={isSubmitting}
+                    autoComplete="email"
+                  />
+                </div>
+                {validationErrors.email && (
+                  <p className="text-sm text-red-600 flex items-center gap-1">
+                    <AlertCircle className="h-3 w-3" />
+                    {validationErrors.email}
+                  </p>
+                )}
+              </div>
+
+              {/* Password Field */}
+              <div className="space-y-2">
+                <Label htmlFor="password" className="text-sm font-medium text-gray-700">
+                  Password
+                </Label>
+                <div className="relative">
+                  <Lock className="absolute left-3 top-3 h-4 w-4 text-gray-400" />
+                  <Input
+                    id="password"
+                    type={showPassword ? 'text' : 'password'}
+                    placeholder="Enter your password"
+                    value={password}
+                    onChange={(e) => setPassword(e.target.value)}
+                    className={`pl-10 pr-10 h-12 ${validationErrors.password ? 'border-red-500' : ''}`}
+                    disabled={isSubmitting}
+                    autoComplete="current-password"
+                  />
+                  <button
+                    type="button"
+                    onClick={() => setShowPassword(!showPassword)}
+                    className="absolute right-3 top-3 h-4 w-4 text-gray-400 hover:text-gray-600"
+                    disabled={isSubmitting}
+                  >
+                    {showPassword ? <EyeOff /> : <Eye />}
+                  </button>
+                </div>
+                {validationErrors.password && (
+                  <p className="text-sm text-red-600 flex items-center gap-1">
+                    <AlertCircle className="h-3 w-3" />
+                    {validationErrors.password}
+                  </p>
+                )}
+              </div>
+
+              {/* Submit Button */}
+              <Button
+                type="submit"
+                className="w-full h-12 bg-gradient-to-r from-blue-500 to-indigo-600 hover:from-blue-600 hover:to-indigo-700 text-white font-medium"
+                disabled={isSubmitting || isLoading}
+              >
+                {isSubmitting || isLoading ? (
+                  <>
+                    <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                    Signing in...
+                  </>
+                ) : (
+                  'Sign In'
+                )}
+              </Button>
+            </form>
+
+            {/* Demo & Guest Options */}
+            <div className="space-y-3">
+              {/* Demo Credentials Toggle */}
+              <div className="text-center">
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  onClick={() => setShowDemoCredentials(!showDemoCredentials)}
+                  className="text-blue-600 hover:text-blue-700 text-sm"
+                >
+                  {showDemoCredentials ? 'Hide' : 'Show'} Demo Credentials
+                </Button>
+              </div>
+
+              {/* Guest Access */}
+              {showGuestOption && (
+                <div className="relative">
+                  <div className="absolute inset-0 flex items-center">
+                    <div className="w-full border-t border-gray-300" />
+                  </div>
+                  <div className="relative flex justify-center text-sm">
+                    <span className="px-4 bg-white text-gray-500">or</span>
+                  </div>
+                </div>
+              )}
+
+              {showGuestOption && (
+                <Button
+                  variant="outline"
+                  className="w-full h-12 border-gray-300 hover:bg-gray-50"
+                  onClick={handleGuestAccess}
+                  disabled={isSubmitting}
+                >
+                  Continue as Guest
+                  <span className="ml-2 text-xs text-gray-500">(5 messages)</span>
+                </Button>
+              )}
+            </div>
+
+            {/* Cancel Button */}
+            {onCancel && (
+              <Button
+                variant="ghost"
+                className="w-full"
+                onClick={onCancel}
+                disabled={isSubmitting}
+              >
+                Cancel
+              </Button>
+            )}
+          </CardContent>
+        </Card>
+
+        {/* Footer */}
         <motion.div
           initial={{ opacity: 0 }}
           animate={{ opacity: 1 }}
-          exit={{ opacity: 0 }}
-          className="fixed inset-0 bg-black/50 backdrop-blur-sm flex items-center justify-center z-50 p-4"
-          onClick={handleClose}
+          transition={{ delay: 0.5 }}
+          className="mt-6 text-center text-sm text-gray-600"
         >
-          <motion.div
-            initial={{ scale: 0.9, opacity: 0, y: 20 }}
-            animate={{ scale: 1, opacity: 1, y: 0 }}
-            exit={{ scale: 0.9, opacity: 0, y: 20 }}
-            transition={{ type: "spring", damping: 25, stiffness: 300 }}
-            onClick={(e) => e.stopPropagation()}
-            className="bg-gradient-to-br from-card/95 via-card/90 to-card/95 backdrop-blur-xl border border-emerald-200/40 dark:border-emerald-800/40 rounded-2xl shadow-2xl w-full max-w-md overflow-hidden"
-          >
-            {/* Header */}
-            <div className="relative p-6 pb-4 bg-gradient-to-r from-emerald-50/50 via-teal-50/30 to-blue-50/50 dark:from-emerald-950/30 dark:via-teal-950/20 dark:to-blue-950/30 border-b border-emerald-200/30 dark:border-emerald-800/30">
-              <Button
-                variant="ghost"
-                size="icon"
-                onClick={handleClose}
-                className="absolute top-4 right-4 h-8 w-8 hover:bg-emerald-100/50 dark:hover:bg-emerald-900/50 rounded-lg transition-colors"
-              >
-                <X className="h-4 w-4" />
-              </Button>
-
-              <div className="text-center">
-                <Logo size="xl" variant="icon-only" animated={true} className="mx-auto mb-4" />
-                <motion.h2
-                  initial={{ opacity: 0, y: 10 }}
-                  animate={{ opacity: 1, y: 0 }}
-                  transition={{ delay: 0.1 }}
-                  className="text-2xl font-bold bg-gradient-to-r from-emerald-600 via-teal-600 to-blue-600 bg-clip-text text-transparent mb-2"
-                >
-                  Welcome Back
-                </motion.h2>
-                <motion.p
-                  initial={{ opacity: 0, y: 10 }}
-                  animate={{ opacity: 1, y: 0 }}
-                  transition={{ delay: 0.2 }}
-                  className="text-muted-foreground text-sm"
-                >
-                  Sign in to access your conversations and unlimited messages
-                </motion.p>
-              </div>
-            </div>
-
-            {/* Form */}
-            <div className="p-6">
-              {/* Error Display */}
-              <AnimatePresence>
-                {error && (
-                  <motion.div
-                    initial={{ opacity: 0, height: 0, marginBottom: 0 }}
-                    animate={{ opacity: 1, height: 'auto', marginBottom: 16 }}
-                    exit={{ opacity: 0, height: 0, marginBottom: 0 }}
-                    className="bg-red-50 dark:bg-red-950/50 border border-red-200 dark:border-red-800 rounded-lg p-3"
-                  >
-                    <div className="flex items-center gap-2">
-                      <AlertCircle className="h-4 w-4 text-red-600" />
-                      <span className="text-sm text-red-700 dark:text-red-300">{error}</span>
-                    </div>
-                  </motion.div>
-                )}
-              </AnimatePresence>
-
-              <form onSubmit={handleSubmit} className="space-y-4">
-                {/* Email Field */}
-                <div>
-                  <label htmlFor="email" className="block text-sm font-medium mb-2">
-                    Email Address
-                  </label>
-                  <div className="relative">
-                    <Mail className="absolute left-3 top-1/2 transform -translate-y-1/2 h-4 w-4 text-emerald-600/70 dark:text-emerald-400/70" />
-                    <Input
-                      id="email"
-                      type="email"
-                      placeholder="Enter your email"
-                      value={formData.email}
-                      onChange={(e) => handleInputChange('email', e.target.value)}
-                      className="pl-10 h-11 bg-gradient-to-r from-emerald-50/50 to-teal-50/30 dark:from-emerald-950/30 dark:to-teal-950/20 border-emerald-200/40 dark:border-emerald-800/40 focus:border-emerald-400 dark:focus:border-emerald-600 transition-all duration-200"
-                      required
-                      disabled={isLoading}
-                      autoComplete="email"
-                    />
-                  </div>
-                </div>
-
-                {/* Password Field */}
-                <div>
-                  <label htmlFor="password" className="block text-sm font-medium mb-2">
-                    Password
-                  </label>
-                  <div className="relative">
-                    <Lock className="absolute left-3 top-1/2 transform -translate-y-1/2 h-4 w-4 text-emerald-600/70 dark:text-emerald-400/70" />
-                    <Input
-                      id="password"
-                      type={showPassword ? 'text' : 'password'}
-                      placeholder="Enter your password"
-                      value={formData.password}
-                      onChange={(e) => handleInputChange('password', e.target.value)}
-                      className="pl-10 pr-10 h-11 bg-gradient-to-r from-emerald-50/50 to-teal-50/30 dark:from-emerald-950/30 dark:to-teal-950/20 border-emerald-200/40 dark:border-emerald-800/40 focus:border-emerald-400 dark:focus:border-emerald-600 transition-all duration-200"
-                      required
-                      disabled={isLoading}
-                      autoComplete="current-password"
-                    />
-                    <Button
-                      type="button"
-                      variant="ghost"
-                      size="sm"
-                      onClick={() => setShowPassword(!showPassword)}
-                      className="absolute right-2 top-1/2 transform -translate-y-1/2 h-7 w-7 p-0 hover:bg-emerald-100/50 dark:hover:bg-emerald-900/50"
-                    >
-                      {showPassword ? (
-                        <EyeOff className="h-3 w-3" />
-                      ) : (
-                        <Eye className="h-3 w-3" />
-                      )}
-                    </Button>
-                  </div>
-                </div>
-
-                {/* Submit Button */}
-                <Button
-                  type="submit"
-                  disabled={isLoading || !formData.email || !formData.password}
-                  className="w-full h-11 bg-gradient-to-r from-emerald-500 via-teal-500 to-blue-600 hover:from-emerald-600 hover:via-teal-600 hover:to-blue-700 text-white border-0 shadow-lg hover:shadow-emerald-500/25 transition-all duration-200 disabled:opacity-50"
-                >
-                  {isLoading ? (
-                    <motion.div
-                      animate={{ rotate: 360 }}
-                      transition={{ duration: 1, repeat: Infinity, ease: "linear" }}
-                      className="flex items-center gap-2"
-                    >
-                      <div className="w-4 h-4 border-2 border-white/30 border-t-white rounded-full" />
-                      Signing In...
-                    </motion.div>
-                  ) : (
-                    <div className="flex items-center gap-2">
-                      <LogIn className="h-4 w-4" />
-                      Sign In
-                    </div>
-                  )}
-                </Button>
-
-                {/* Forgot Password */}
-                <div className="text-center">
-                  <Button
-                    type="button"
-                    variant="ghost"
-                    size="sm"
-                    className="text-xs text-emerald-600 hover:text-emerald-700 dark:text-emerald-400 dark:hover:text-emerald-300 hover:bg-emerald-50 dark:hover:bg-emerald-950/50"
-                    disabled={isLoading}
-                  >
-                    Forgot your password?
-                  </Button>
-                </div>
-              </form>
-            </div>
-
-            {/* Footer */}
-            <div className="px-6 pb-6">
-              <div className="text-center pt-4 border-t border-emerald-200/30 dark:border-emerald-800/30">
-                {/* Admin Note */}
-                <div className="mb-4 p-3 bg-gradient-to-r from-blue-50/50 via-indigo-50/30 to-purple-50/50 dark:from-blue-950/30 dark:via-indigo-950/20 dark:to-purple-950/30 rounded-lg border border-blue-200/40 dark:border-blue-800/40">
-                  <div className="flex items-center gap-2 justify-center mb-1">
-                    <Shield className="h-4 w-4 text-blue-600" />
-                    <span className="text-sm font-medium text-blue-700 dark:text-blue-300">
-                      Account Creation
-                    </span>
-                  </div>
-                  <p className="text-xs text-blue-600/80 dark:text-blue-400/80">
-                    New accounts can only be created by administrators
-                  </p>
-                </div>
-                
-                {/* Branding Footer */}
-                <div className="pt-4 border-t border-emerald-200/20 dark:border-emerald-800/20">
-                  <div className="flex items-center justify-center gap-2">
-                    <Logo size="sm" variant="minimal" animated={false} />
-                  </div>
-                  <p className="text-xs text-muted-foreground/70 mt-2">
-                    Your AI-powered conversation companion
-                  </p>
-                </div>
-              </div>
-            </div>
-          </motion.div>
+          <p>Enterprise Internal Chatbot v2.0</p>
+          <p className="mt-1">Max 20-50 users • Secure & Private</p>
         </motion.div>
-      )}
-    </AnimatePresence>
+      </motion.div>
+    </div>
   );
-}
+};
+
+export default LoginForm;

@@ -6,31 +6,24 @@ import {
   createChatSession, 
   updateChatSession, 
   trackUsage,
-  getUserUsage 
+  getUserUsage,
+  getSessionMessages
 } from '@/lib/supabase';
-import { getFileMetadata } from '@/lib/storage';
 import { GoogleGenerativeAI } from '@google/generative-ai';
 import { z } from 'zod';
-import { cacheManager } from '@/lib/redis';
-import { RateLimiter } from '@/lib/rateLimiter';
 
 // Initialize Gemini
 const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY!);
 
-// Rate limiter for chat API
-const chatRateLimiter = new RateLimiter({
-  windowMs: 60 * 1000, // 1 minute window
-  maxRequests: 30, // 30 requests per minute per IP
-  keyGenerator: (req) => `chat_${req.headers.get('x-forwarded-for') || req.ip || 'unknown'}`,
-  customMessage: 'Too many chat requests. Please slow down.'
-});
+// ========================================
+// VALIDATION SCHEMAS
+// ========================================
 
-// Enhanced request validation schemas
 const attachmentSchema = z.object({
   id: z.string().optional(),
   name: z.string().min(1, 'File name is required'),
   type: z.string().min(1, 'File type is required'),
-  size: z.number().positive('File size must be positive'),
+  size: z.number().positive('File size must be positive').max(10 * 1024 * 1024, 'File must be under 10MB'),
   url: z.string().url().optional(),
   mimeType: z.string().optional(),
   fileName: z.string().optional(),
@@ -41,9 +34,7 @@ const attachmentSchema = z.object({
 });
 
 const contextMessageSchema = z.object({
-  role: z.enum(['user', 'assistant'], {
-    errorMap: () => ({ message: 'Role must be either "user" or "assistant"' })
-  }),
+  role: z.enum(['user', 'assistant']),
   content: z.string().min(1, 'Message content cannot be empty'),
   timestamp: z.union([z.string(), z.date()]).optional()
 });
@@ -60,11 +51,13 @@ const chatRequestSchema = z.object({
   sessionId: z.string().uuid('Invalid session ID format').optional(),
   attachments: z.array(attachmentSchema).optional().default([]),
   conversationContext: z.array(contextMessageSchema).optional().default([]),
-  continueFrom: z.string().optional(),
   settings: settingsSchema.optional().default({})
 });
 
-// Response interface
+// ========================================
+// INTERFACES
+// ========================================
+
 interface ChatResponse {
   success: boolean;
   response?: string;
@@ -86,23 +79,74 @@ interface ChatResponse {
   };
 }
 
-// Helper function to validate and process attachments
+interface GuestSession {
+  id: string;
+  sessionToken: string;
+  messageCount: number;
+  maxMessages: number;
+  expiresAt: string;
+}
+
+// ========================================
+// HELPER FUNCTIONS
+// ========================================
+
+async function checkUserQuota(user: any): Promise<{ allowed: boolean; usage: any; quota: number }> {
+  const usage = await getUserUsage(user?.id);
+  const quota = user?.role === 'admin' ? 1000 : (user ? 100 : 5); // Guest: 5, User: 100, Admin: 1000
+  
+  return {
+    allowed: usage.messageCount < quota,
+    usage,
+    quota
+  };
+}
+
+async function checkGuestQuota(request: NextRequest): Promise<{ allowed: boolean; session: GuestSession | null }> {
+  const guestToken = request.headers.get('x-guest-token') || request.cookies.get('guest-token')?.value;
+  
+  if (!guestToken) {
+    return { allowed: false, session: null };
+  }
+
+  try {
+    const response = await fetch(`${process.env.NEXT_PUBLIC_APP_URL}/api/auth/guest/verify`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ token: guestToken })
+    });
+
+    if (response.ok) {
+      const data = await response.json();
+      return {
+        allowed: data.session.messageCount < data.session.maxMessages,
+        session: data.session
+      };
+    }
+  } catch (error) {
+    console.error('Guest quota check error:', error);
+  }
+
+  return { allowed: false, session: null };
+}
+
 async function processAttachments(attachments: any[]): Promise<any[]> {
   const processedAttachments = [];
-  const maxFileSize = 50 * 1024 * 1024; // 50MB
+  const maxFileSize = 10 * 1024 * 1024; // 10MB limit
   const allowedTypes = [
-    'image/jpeg', 'image/png', 'image/gif', 'image/webp',
-    'audio/mpeg', 'audio/wav', 'audio/ogg',
-    'video/mp4', 'video/webm',
-    'application/pdf', 'text/plain', 'text/csv',
-    'application/json', 'text/markdown'
+    'image/jpeg', 'image/png', 'image/gif', 'image/webp', 'image/svg+xml',
+    'audio/mpeg', 'audio/wav', 'audio/ogg', 'audio/mp4', 'audio/webm',
+    'video/mp4', 'video/webm', 'video/quicktime', 'video/x-msvideo',
+    'application/pdf', 'text/plain', 'text/csv', 'text/markdown',
+    'application/json', 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+    'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'
   ];
   
   for (const attachment of attachments) {
     try {
       // Validate file size
       if (attachment.size > maxFileSize) {
-        throw new Error(`File ${attachment.name} exceeds maximum size of 50MB`);
+        throw new Error(`File ${attachment.name} exceeds maximum size of 10MB`);
       }
 
       // Validate file type
@@ -111,7 +155,7 @@ async function processAttachments(attachments: any[]): Promise<any[]> {
         throw new Error(`File type ${fileType} is not supported`);
       }
 
-      // Process attachment
+      // Process attachment for Gemini
       const processed = {
         id: attachment.id || crypto.randomUUID(),
         name: attachment.name || attachment.fileName || 'unknown_file',
@@ -132,92 +176,115 @@ async function processAttachments(attachments: any[]): Promise<any[]> {
   return processedAttachments;
 }
 
-// Helper function to build conversation context for Gemini
-function buildGeminiContext(context: any[], currentMessage: string, attachments: any[]): string {
-  let prompt = '';
+async function buildContextForGemini(sessionId: string, currentMessage: string, attachments: any[]): Promise<any[]> {
+  const parts = [];
   
-  // Add system context
-  prompt += "You are an intelligent AI assistant. You can communicate in Indonesian and English. Be helpful, informative, and concise.\n\n";
-  
-  // Add conversation history (last 15 messages for better context)
-  if (context && context.length > 0) {
-    const recentContext = context.slice(-15);
-    prompt += "Previous conversation:\n";
-    
-    for (const msg of recentContext) {
-      const role = msg.role === 'user' ? 'User' : 'Assistant';
-      const timestamp = msg.timestamp ? new Date(msg.timestamp).toLocaleTimeString() : '';
-      prompt += `[${timestamp}] ${role}: ${msg.content}\n`;
-    }
-    
-    prompt += "\n---\n\n";
-  }
-  
-  // Add current message
-  prompt += `Current message: ${currentMessage}`;
-  
-  // Add attachment information
-  if (attachments && attachments.length > 0) {
-    prompt += "\n\nAttached files:\n";
-    for (const attachment of attachments) {
-      const sizeKB = Math.round(attachment.size / 1024);
-      prompt += `- ${attachment.name} (${attachment.type}, ${sizeKB}KB)\n`;
-      
-      // Add specific handling instructions based on file type
-      if (attachment.type.startsWith('image/')) {
-        prompt += "  → Please analyze and describe this image\n";
-      } else if (attachment.type.startsWith('audio/')) {
-        prompt += "  → Please transcribe or analyze this audio file\n";
-      } else if (attachment.type === 'application/pdf' || attachment.type === 'text/plain') {
-        prompt += "  → Please read and summarize the content of this document\n";
+  // Add system instruction
+  parts.push({
+    text: "You are a helpful AI assistant. You can communicate in Indonesian and English. Be informative, concise, and helpful. When analyzing files, provide detailed insights. Always maintain conversation context and refer to previous messages when relevant."
+  });
+
+  // Get conversation history for context (last 20 messages)
+  if (sessionId) {
+    try {
+      const messages = await getSessionMessages(sessionId, 20);
+      if (messages && messages.length > 0) {
+        parts.push({
+          text: "\n=== Previous Conversation ===\n"
+        });
+        
+        for (const msg of messages) {
+          const role = msg.role === 'user' ? 'User' : 'Assistant';
+          parts.push({
+            text: `${role}: ${msg.content}\n`
+          });
+        }
+        
+        parts.push({
+          text: "=== Current Message ===\n"
+        });
       }
+    } catch (error) {
+      console.error('Error loading conversation history:', error);
     }
-    
-    prompt += "\nPlease address the attached files in your response when relevant.\n";
   }
-  
-  return prompt;
+
+  // Process attachments first
+  for (const attachment of attachments) {
+    try {
+      if (attachment.base64) {
+        // For images, videos, and audio - direct Gemini processing
+        if (attachment.mimeType.startsWith('image/')) {
+          parts.push({
+            inlineData: {
+              mimeType: attachment.mimeType,
+              data: attachment.base64
+            }
+          });
+          parts.push({
+            text: `[Image uploaded: ${attachment.name}] Please analyze this image and provide insights.`
+          });
+        } else if (attachment.mimeType.startsWith('video/')) {
+          parts.push({
+            inlineData: {
+              mimeType: attachment.mimeType,
+              data: attachment.base64
+            }
+          });
+          parts.push({
+            text: `[Video uploaded: ${attachment.name}] Please analyze this video content.`
+          });
+        } else if (attachment.mimeType.startsWith('audio/')) {
+          parts.push({
+            inlineData: {
+              mimeType: attachment.mimeType,
+              data: attachment.base64
+            }
+          });
+          parts.push({
+            text: `[Audio uploaded: ${attachment.name}] Please transcribe and analyze this audio.`
+          });
+        } else {
+          // For other file types, decode base64 and extract text
+          try {
+            const decodedContent = Buffer.from(attachment.base64, 'base64').toString('utf-8');
+            parts.push({
+              text: `[File: ${attachment.name}]\nContent:\n${decodedContent.substring(0, 5000)}${decodedContent.length > 5000 ? '...[truncated]' : ''}`
+            });
+          } catch (error) {
+            parts.push({
+              text: `[File: ${attachment.name}] - Unable to process file content directly.`
+            });
+          }
+        }
+      } else if (attachment.url) {
+        parts.push({
+          text: `[File attached: ${attachment.name} (${attachment.mimeType})] - Processing from URL not implemented yet.`
+        });
+      }
+    } catch (error) {
+      console.error('Error processing attachment for Gemini:', error);
+      parts.push({
+        text: `[File: ${attachment.name}] - Error processing file.`
+      });
+    }
+  }
+
+  // Add current message
+  parts.push({
+    text: currentMessage
+  });
+
+  return parts;
 }
 
-// Helper function to check user quota
-async function checkUserQuota(user: any): Promise<{ allowed: boolean; usage: any; quota: number }> {
-  try {
-    const usage = user ? await getUserUsage(user.id) : { messageCount: 0, fileUploads: 0 };
-    const quota = user?.role === 'admin' ? 1000 : (user ? 100 : 10);
-    
-    return {
-      allowed: usage.messageCount < quota,
-      usage,
-      quota
-    };
-  } catch (error) {
-    console.error('Error checking user quota:', error);
-    // Default to allowing the request if quota check fails
-    return {
-      allowed: true,
-      usage: { messageCount: 0, fileUploads: 0 },
-      quota: user?.role === 'admin' ? 1000 : (user ? 100 : 10)
-    };
-  }
-}
-
-// Helper function to save message to database
-async function saveMessage(
-  sessionId: string | undefined,
-  role: 'user' | 'assistant',
-  content: string,
-  attachments?: any[],
-  metadata?: any
-): Promise<string | undefined> {
-  if (!sessionId) return undefined;
-
+async function saveMessage(sessionId: string, role: string, content: string, attachments?: any[]): Promise<string | undefined> {
   try {
     const message = await createMessage({
       session_id: sessionId,
       role,
       content,
-      attachments: attachments && attachments.length > 0 ? attachments : undefined,
-      metadata
+      attachments: attachments || []
     });
     return message?.id;
   } catch (error) {
@@ -226,179 +293,95 @@ async function saveMessage(
   }
 }
 
-// Main POST handler
-export async function POST(request: NextRequest): Promise<NextResponse<ChatResponse>> {
+// ========================================
+// MAIN API HANDLER
+// ========================================
+
+export async function POST(request: NextRequest) {
   const startTime = Date.now();
   
   try {
-    // Apply rate limiting
-    const rateLimitResult = await chatRateLimiter.checkLimit(request);
-    if (!rateLimitResult.allowed) {
-      return NextResponse.json(
-        {
-          success: false,
-          error: 'Rate limit exceeded. Please slow down.',
-          errorType: 'rate_limit_exceeded',
-          details: {
-            retryAfter: rateLimitResult.retryAfter,
-            remainingRequests: rateLimitResult.remaining
-          }
-        },
-        { status: 429 }
-      );
-    }
-
-    // Parse request body with enhanced error handling
-    let body;
-    try {
-      const rawBody = await request.text();
-      
-      if (!rawBody.trim()) {
-        return NextResponse.json(
-          {
-            success: false,
-            error: 'Request body cannot be empty',
-            errorType: 'validation_error',
-            details: 'Please provide a valid JSON request body'
-          },
-          { status: 400 }
-        );
-      }
-      
-      try {
-        body = JSON.parse(rawBody);
-      } catch (parseError) {
-        return NextResponse.json(
-          {
-            success: false,
-            error: 'Invalid JSON format in request body',
-            errorType: 'parse_error',
-            details: parseError instanceof Error ? parseError.message : 'Failed to parse JSON'
-          },
-          { status: 400 }
-        );
-      }
-    } catch (error) {
-      return NextResponse.json(
-        {
-          success: false,
-          error: 'Failed to read request body',
-          errorType: 'request_error',
-          details: error instanceof Error ? error.message : 'Unknown request error'
-        },
-        { status: 400 }
-      );
-    }
-
-    // Validate request structure with Zod
+    // Parse request body
+    const body = await request.json();
     const validation = chatRequestSchema.safeParse(body);
 
     if (!validation.success) {
-      const errorDetails = validation.error.errors.map(err => ({
-        field: err.path.join('.'),
-        message: err.message,
-        code: err.code
-      }));
-
       return NextResponse.json(
         {
           success: false,
           error: 'Invalid request format',
           errorType: 'validation_error',
-          details: errorDetails
+          details: validation.error.errors
         },
         { status: 400 }
       );
     }
 
-    const { 
-      message, 
-      sessionId, 
-      attachments = [], 
-      conversationContext = [],
-      continueFrom,
-      settings = {} 
-    } = validation.data;
+    const { message, sessionId, attachments = [], settings = {} } = validation.data;
 
-    // Set default settings with validation
-    const finalSettings: { model: string; temperature: number; maxTokens: number; systemPrompt?: string } = {
+    // Set final settings
+    const finalSettings = {
       model: 'gemini-1.5-flash',
       temperature: 0.7,
       maxTokens: 4096,
       ...settings
     };
 
-    // Validate model selection
-    const allowedModels = ['gemini-1.5-flash', 'gemini-1.5-pro', 'gemini-1.0-pro'];
-    if (!allowedModels.includes(finalSettings.model)) {
-      finalSettings.model = 'gemini-1.5-flash';
-    }
-
-    // Get and validate user authentication
+    // Get user (could be null for guest)
     const user = await getUserFromRequest(request);
     
-    // Check user quota
-    const quotaCheck = await checkUserQuota(user);
+    // Check quota
+    let quotaCheck;
+    if (user) {
+      quotaCheck = await checkUserQuota(user);
+    } else {
+      const guestCheck = await checkGuestQuota(request);
+      quotaCheck = {
+        allowed: guestCheck.allowed,
+        usage: { messageCount: guestCheck.session?.messageCount || 0 },
+        quota: 5
+      };
+    }
+
     if (!quotaCheck.allowed) {
       return NextResponse.json(
         {
           success: false,
-          error: 'Message quota exceeded. Please upgrade your plan or try again later.',
+          error: user ? 'Message quota exceeded' : 'Guest quota exceeded (5 messages max)',
           errorType: 'quota_exceeded',
           details: {
             current: quotaCheck.usage.messageCount,
-            limit: quotaCheck.quota,
-            resetTime: new Date(Date.now() + 24 * 60 * 60 * 1000).toISOString()
+            limit: quotaCheck.quota
           }
         },
         { status: 429 }
       );
     }
 
-    // Process and validate attachments
+    // Process attachments
     let processedAttachments: any[] = [];
-    try {
-      if (attachments.length > 0) {
+    if (attachments.length > 0) {
+      try {
         processedAttachments = await processAttachments(attachments);
-        
-        // Check file upload quota for users with attachments
-        if (user && processedAttachments.length > 0) {
-          const fileQuota = user.role === 'admin' ? 1000 : 50;
-          if (quotaCheck.usage.fileUploads >= fileQuota) {
-            return NextResponse.json(
-              {
-                success: false,
-                error: 'File upload quota exceeded',
-                errorType: 'file_quota_exceeded'
-              },
-              { status: 429 }
-            );
-          }
-        }
+      } catch (error) {
+        return NextResponse.json(
+          {
+            success: false,
+            error: 'Failed to process file attachments',
+            errorType: 'attachment_error',
+            details: error instanceof Error ? error.message : 'Unknown attachment error'
+          },
+          { status: 400 }
+        );
       }
-    } catch (error) {
-      return NextResponse.json(
-        {
-          success: false,
-          error: 'Failed to process file attachments',
-          errorType: 'attachment_error',
-          details: error instanceof Error ? error.message : 'Unknown attachment error'
-        },
-        { status: 400 }
-      );
     }
 
     // Handle session management
     let currentSessionId = sessionId;
-    
     if (user && !currentSessionId) {
       try {
-        // Create new session for authenticated users
         const sessionTitle = message.slice(0, 50) + (message.length > 50 ? '...' : '');
-        const newSession = await createChatSession(
-          user.id,
-          sessionTitle
-        );
+        const newSession = await createChatSession(user.id, sessionTitle);
         currentSessionId = newSession?.id;
       } catch (error) {
         console.error('Error creating session:', error);
@@ -417,290 +400,110 @@ export async function POST(request: NextRequest): Promise<NextResponse<ChatRespo
       );
     }
 
-    // Prepare and send request to Gemini AI
+    // Build context for Gemini
+    const contextParts = await buildContextForGemini(currentSessionId || '', message, processedAttachments);
+
+    // Generate AI response
+    let aiResponse = '';
+    let tokensUsed = 0;
+
     try {
-      // Get the AI model
       const model = genAI.getGenerativeModel({ 
         model: finalSettings.model,
         generationConfig: {
           temperature: finalSettings.temperature,
           maxOutputTokens: finalSettings.maxTokens,
-        },
-        systemInstruction: finalSettings.systemPrompt || 
-          "You are a helpful AI assistant. Respond naturally in Indonesian when appropriate, but you can also use English or other languages as needed. Be informative, concise, and helpful. When analyzing files or attachments, provide detailed and useful insights."
-      });
-
-      // Build enhanced prompt with full context
-      let prompt = buildGeminiContext(conversationContext, message, processedAttachments);
-
-      // Handle continue functionality
-      if (continueFrom) {
-        prompt = `Continue the following response naturally and seamlessly: "${continueFrom}"\n\nOriginal context: ${prompt}`;
-      }
-
-      // Generate AI response with timeout
-      const aiStartTime = Date.now();
-      const result = await Promise.race([
-        model.generateContent(prompt),
-        new Promise((_, reject) => 
-          setTimeout(() => reject(new Error('AI request timeout')), 30000) // 30 second timeout
-        )
-      ]) as any;
-
-      const response = result.response;
-      const aiResponse = response.text();
-
-      if (!aiResponse || aiResponse.trim().length === 0) {
-        return NextResponse.json(
-          {
-            success: false,
-            error: 'AI generated empty response. Please try rephrasing your message.',
-            errorType: 'ai_empty_response'
-          },
-          { status: 500 }
-        );
-      }
-
-      const aiProcessingTime = Date.now() - aiStartTime;
-
-      // Save AI response to database
-      let aiMessageId: string | undefined;
-      if (user && currentSessionId) {
-        aiMessageId = await saveMessage(
-          currentSessionId,
-          'assistant',
-          aiResponse,
-          undefined,
-          {
-            model: finalSettings.model,
-            temperature: finalSettings.temperature,
-            processingTime: aiProcessingTime,
-            attachmentCount: processedAttachments.length,
-            conversationLength: conversationContext.length,
-            continueFrom: continueFrom || null
-          }
-        );
-
-        // Update session timestamp and metadata
-        try {
-          await updateChatSession(currentSessionId, {
-            updated_at: new Date().toISOString(),
-            metadata: {
-              lastModel: finalSettings.model,
-              messageCount: conversationContext.length + 2,
-              lastActivity: new Date().toISOString(),
-              hasAttachments: processedAttachments.length > 0
-            }
-          });
-        } catch (error) {
-          console.error('Error updating session:', error);
-        }
-      }
-
-      // Track usage for authenticated users
-      if (user) {
-        try {
-          await trackUsage(user.id, 'message');
-          if (processedAttachments.length > 0) {
-            await trackUsage(user.id, 'file_upload');
-          }
-        } catch (error) {
-          console.error('Error tracking usage:', error);
-        }
-      }
-
-      // Get updated usage for response
-      let updatedUsage = quotaCheck.usage;
-      if (user) {
-        try {
-          updatedUsage = await getUserUsage(user.id);
-        } catch (error) {
-          console.error('Error getting updated usage:', error);
-        }
-      }
-
-      const totalProcessingTime = Date.now() - startTime;
-
-      // Cache successful response for potential retry scenarios
-      if (user && currentSessionId) {
-        try {
-          const cacheKey = `chat_response:${currentSessionId}:${userMessageId}`;
-          await cacheManager.set(cacheKey, {
-            response: aiResponse,
-            timestamp: new Date().toISOString()
-          }, 300); // Cache for 5 minutes
-        } catch (error) {
-          console.error('Error caching response:', error);
-        }
-      }
-
-      // Return successful response
-      return NextResponse.json({
-        success: true,
-        response: aiResponse,
-        sessionId: currentSessionId,
-        messageId: aiMessageId,
-        usage: {
-          messageCount: updatedUsage.messageCount + 1,
-          remainingQuota: Math.max(0, quotaCheck.quota - (updatedUsage.messageCount + 1))
-        },
-        metadata: {
-          model: finalSettings.model,
-          temperature: finalSettings.temperature,
-          processingTime: totalProcessingTime,
-          attachmentCount: processedAttachments.length
         }
       });
 
-    } catch (aiError) {
-      console.error('Gemini AI error:', aiError);
-      
-      // Handle specific AI service errors
-      if (aiError instanceof Error) {
-        const errorMessage = aiError.message.toLowerCase();
-        
-        if (errorMessage.includes('safety') || errorMessage.includes('blocked')) {
-          return NextResponse.json(
-            {
-              success: false,
-              error: 'Content blocked by safety filters. Please rephrase your message to comply with content guidelines.',
-              errorType: 'safety_filter'
-            },
-            { status: 400 }
-          );
-        }
-        
-        if (errorMessage.includes('quota') || errorMessage.includes('exceeded')) {
-          return NextResponse.json(
-            {
-              success: false,
-              error: 'AI service quota exceeded. Please try again later.',
-              errorType: 'quota_exceeded'
-            },
-            { status: 429 }
-          );
-        }
+      const result = await model.generateContent(contextParts);
+      const response = await result.response;
+      aiResponse = response.text();
 
-        if (errorMessage.includes('invalid') || errorMessage.includes('argument')) {
-          return NextResponse.json(
-            {
-              success: false,
-              error: 'Invalid input provided to AI service. Please check your message and try again.',
-              errorType: 'invalid_input'
-            },
-            { status: 400 }
-          );
-        }
+      // Estimate tokens used (approximate)
+      tokensUsed = Math.ceil((message.length + aiResponse.length) / 4);
 
-        if (errorMessage.includes('timeout')) {
-          return NextResponse.json(
-            {
-              success: false,
-              error: 'AI service request timed out. Please try again with a shorter message.',
-              errorType: 'timeout_error'
-            },
-            { status: 408 }
-          );
-        }
-      }
-
+    } catch (error) {
+      console.error('Gemini API error:', error);
       return NextResponse.json(
         {
           success: false,
-          error: 'AI service temporarily unavailable. Please try again in a moment.',
-          errorType: 'ai_service_error',
-          details: process.env.NODE_ENV === 'development' 
-            ? (aiError instanceof Error ? aiError.message : 'Unknown AI error')
-            : undefined
+          error: 'Failed to generate AI response',
+          errorType: 'ai_error',
+          details: error instanceof Error ? error.message : 'Unknown AI error'
         },
-        { status: 503 }
+        { status: 500 }
       );
     }
 
-  } catch (error) {
-    console.error('Chat API critical error:', error);
-    
-    // Handle different types of system errors
-    if (error instanceof Error) {
-      const errorMessage = error.message.toLowerCase();
+    // Save AI response to database
+    let aiMessageId: string | undefined;
+    if (user && currentSessionId) {
+      aiMessageId = await saveMessage(currentSessionId, 'assistant', aiResponse);
       
-      if (errorMessage.includes('jwt') || errorMessage.includes('token') || errorMessage.includes('auth')) {
-        return NextResponse.json(
-          {
-            success: false,
-            error: 'Authentication token invalid or expired. Please login again.',
-            errorType: 'auth_error'
-          },
-          { status: 401 }
-        );
-      }
+      // Update session with last message time
+      await updateChatSession(currentSessionId, {
+        last_message_at: new Date().toISOString(),
+        message_count: (await getSessionMessages(currentSessionId, 1000)).length + 1
+      });
+    }
 
-      if (errorMessage.includes('database') || errorMessage.includes('connection') || errorMessage.includes('supabase')) {
-        return NextResponse.json(
-          {
-            success: false,
-            error: 'Database temporarily unavailable. Please try again.',
-            errorType: 'database_error'
-          },
-          { status: 503 }
-        );
+    // Track usage
+    if (user) {
+      await trackUsage(user.id, 'message');
+      if (processedAttachments.length > 0) {
+        await trackUsage(user.id, 'file_upload');
       }
-
-      if (errorMessage.includes('network') || errorMessage.includes('fetch')) {
-        return NextResponse.json(
-          {
-            success: false,
-            error: 'Network error occurred. Please check your connection and try again.',
-            errorType: 'network_error'
-          },
-          { status: 503 }
-        );
+    } else {
+      // Update guest session
+      const guestToken = request.headers.get('x-guest-token') || request.cookies.get('guest-token')?.value;
+      if (guestToken) {
+        try {
+          await fetch(`${process.env.NEXT_PUBLIC_APP_URL}/api/auth/guest/update`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ token: guestToken, messageCount: 1 })
+          });
+        } catch (error) {
+          console.error('Guest session update error:', error);
+        }
       }
     }
 
+    // Calculate processing time
+    const processingTime = Date.now() - startTime;
+
+    // Return successful response
+    const response: ChatResponse = {
+      success: true,
+      response: aiResponse,
+      sessionId: currentSessionId,
+      messageId: aiMessageId,
+      usage: {
+        messageCount: quotaCheck.usage.messageCount + 1,
+        remainingQuota: quotaCheck.quota - quotaCheck.usage.messageCount - 1,
+        tokensUsed
+      },
+      metadata: {
+        model: finalSettings.model,
+        temperature: finalSettings.temperature,
+        processingTime,
+        attachmentCount: processedAttachments.length
+      }
+    };
+
+    return NextResponse.json(response);
+
+  } catch (error) {
+    console.error('Chat API error:', error);
     return NextResponse.json(
       {
         success: false,
-        error: 'Internal server error occurred. Please try again.',
+        error: 'Internal server error',
         errorType: 'server_error',
-        details: process.env.NODE_ENV === 'development' 
-          ? (error instanceof Error ? error.message : 'Unknown error')
-          : undefined
+        details: error instanceof Error ? error.message : 'Unknown server error'
       },
       { status: 500 }
     );
   }
-}
-
-// Handle OPTIONS requests for CORS preflight
-export async function OPTIONS(request: NextRequest) {
-  return new NextResponse(null, {
-    status: 200,
-    headers: {
-      'Access-Control-Allow-Origin': process.env.NODE_ENV === 'production' 
-        ? 'https://yourdomain.com' 
-        : '*',
-      'Access-Control-Allow-Methods': 'POST, OPTIONS',
-      'Access-Control-Allow-Headers': 'Content-Type, Authorization, X-Requested-With',
-      'Access-Control-Max-Age': '86400', // 24 hours
-    },
-  });
-}
-
-// Handle GET requests (for API health check)
-export async function GET(request: NextRequest) {
-  return NextResponse.json({
-    success: true,
-    message: 'Chat API is running',
-    version: '2.0',
-    timestamp: new Date().toISOString(),
-    features: [
-      'file_attachments',
-      'conversation_context',
-      'rate_limiting',
-      'user_authentication',
-      'session_management',
-      'usage_tracking'
-    ]
-  });
 }

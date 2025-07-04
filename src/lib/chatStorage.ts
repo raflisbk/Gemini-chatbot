@@ -1,433 +1,720 @@
+// src/lib/chatStorage.ts - FINAL VERSION FOR CHATBOT.TSX COMPATIBILITY
 import { 
-  supabase, 
   getUserSessions, 
+  deleteSession, 
   createChatSession, 
   updateChatSession, 
-  getSessionMessages, 
   createMessage, 
-  deleteSession as deleteSessionFromDB 
+  getSessionMessages,
+  supabaseAdmin 
 } from './supabase';
-import { generateId } from './utils';
 
-// Keep backward compatibility with existing types
+// Import compatibility types
+import type { 
+  ChatBotSession, 
+  ChatBotMessage, 
+  SessionSummary,
+  convertStoredSessionToChatSession,
+  convertMessageWithFilesToChatBotMessage
+} from '@/types/chatbot';
+
+// ========================================
+// EXPORTED INTERFACES - FINAL VERSION
+// ========================================
+
+export interface ChatSession extends ChatBotSession {
+  messages?: Message[]; // Override with correct Message type
+}
+
+export interface ChatMessage {
+  id: string;
+  session_id: string | null;
+  user_id: string | null;
+  role: string;
+  content: string;
+  attachments: any[];
+  tokens_used: number;
+  model_used: string;
+  processing_time_ms: number;
+  metadata: any;
+  created_at: string;
+}
+
+export interface StoredSession {
+  id: string;
+  title: string;
+  lastMessage: string;
+  timestamp: string;
+  messageCount: number;
+  isActive: boolean;
+}
+
+// Message interface with Date timestamp for ChatBot compatibility
 export interface Message {
   id: string;
   role: 'user' | 'assistant';
   content: string;
   timestamp: Date;
-  attachments?: Array<{
-    id: string;
-    name: string;
-    type: string;
-    size: number;
-    url: string;
-  }>;
-  metadata?: Record<string, any>;
+  attachments?: any[];
+  tokens_used?: number;
+  model_used?: string;
 }
 
-export interface ChatSession {
+export interface MessageWithFiles {
   id: string;
-  title: string;
-  messages: Message[];
-  createdAt: Date;
-  updatedAt: Date;
-  isArchived?: boolean;
-  metadata?: Record<string, any>;
+  role: 'user' | 'assistant';
+  content: string;
+  timestamp: string;
+  attachments?: any[];
+  tokens_used?: number;
+  model_used?: string;
 }
 
-const MAX_SESSIONS = 50; // Limit for performance
-const GUEST_STORAGE_KEY = 'guest-chat-sessions';
+// ========================================
+// CHAT STORAGE CLASS - FINAL IMPLEMENTATION
+// ========================================
 
 export class ChatStorage {
-  static updateSession(currentSessionId: string, updatedMessages: Message[]) {
-    throw new Error('Method not implemented.');
-  }
-  static createSession(firstMessage: { id: string; content: string; role: "user"; timestamp: Date; }) {
-    throw new Error('Method not implemented.');
-  }
-  // Get sessions for authenticated users from Supabase, guests from localStorage
-  static async getSessions(userId?: string): Promise<ChatSession[]> {
-    if (userId) {
-      // Authenticated user - fetch from Supabase
-      try {
-        const sessions = await getUserSessions(userId);
-        
-        // Convert to our ChatSession format
-        const chatSessions: ChatSession[] = await Promise.all(
-          sessions.map(async (session) => {
-            const messages = await getSessionMessages(session.id);
-            
-            return {
-              id: session.id,
-              title: session.title,
-              createdAt: new Date(session.created_at),
-              updatedAt: new Date(session.updated_at),
-              isArchived: session.is_archived,
-              metadata: session.session_data as Record<string, any>,
-              messages: messages.map(msg => ({
-                id: msg.id,
-                role: msg.role as 'user' | 'assistant',
-                content: msg.content,
-                timestamp: new Date(msg.timestamp),
-                attachments: msg.attachments as any[],
-                metadata: msg.metadata as Record<string, any>
-              }))
-            };
-          })
-        );
-
-        return chatSessions;
-      } catch (error) {
-        console.error('Error loading chat sessions from Supabase:', error);
-        return [];
-      }
-    } else {
-      // Guest user - use localStorage
-      return this.getGuestSessions();
-    }
-  }
-
-  // Get guest sessions from localStorage (fallback)
-  static getGuestSessions(): ChatSession[] {
-    if (typeof window === 'undefined') return [];
-    
+  // FIXED: getSessions method with proper return type
+  static async getSessions(userId: string): Promise<ChatSession[]> {
     try {
-      const stored = localStorage.getItem(GUEST_STORAGE_KEY);
-      if (!stored) return [];
+      const storedSessions = await loadUserSessions(userId);
       
-      const sessions = JSON.parse(stored);
-      return sessions.map((session: any) => ({
-        ...session,
-        createdAt: new Date(session.createdAt),
-        updatedAt: new Date(session.updatedAt),
-        messages: session.messages.map((msg: any) => ({
-          ...msg,
-          timestamp: new Date(msg.timestamp)
-        }))
-      }));
+      // Convert StoredSession[] to ChatSession[]
+      const chatSessions: ChatSession[] = [];
+      
+      for (const stored of storedSessions) {
+        const session: ChatSession = {
+          id: stored.id,
+          user_id: userId,
+          title: stored.title,
+          message_count: stored.messageCount,
+          last_message_at: stored.timestamp,
+          context_summary: stored.lastMessage,
+          settings: {},
+          is_active: stored.isActive,
+          created_at: stored.timestamp,
+          updated_at: stored.timestamp,
+          updatedAt: stored.timestamp,
+          messages: [] // Initialize empty messages array
+        };
+        chatSessions.push(session);
+      }
+      
+      return chatSessions;
     } catch (error) {
-      console.error('Error loading guest chat sessions:', error);
+      console.error('Error getting sessions:', error);
       return [];
     }
   }
 
-  // Save session for authenticated users to Supabase, guests to localStorage
-  static async saveSession(session: ChatSession, userId?: string): Promise<void> {
-    if (userId) {
-      // Authenticated user - save to Supabase
-      try {
-        // Check if session exists
-        const existingSessions = await getUserSessions(userId);
-        const existingSession = existingSessions.find(s => s.id === session.id);
-
-        if (existingSession) {
-          // Update existing session
-          await updateChatSession(session.id, {
-            title: session.title,
-            updated_at: new Date().toISOString(),
-            session_data: session.metadata || {}
-          });
-        } else {
-          // Create new session
-          await createChatSession(
-            userId,
-            session.title
-          );
-        }
-
-        // Save messages that don't exist yet
-        const existingMessages = await getSessionMessages(session.id);
-        const existingMessageIds = new Set(existingMessages.map(m => m.id));
-
-        for (const message of session.messages) {
-          if (!existingMessageIds.has(message.id)) {
-            await createMessage({
-              id: message.id,
-              session_id: session.id,
-              role: message.role,
-              content: message.content,
-              timestamp: message.timestamp.toISOString(),
-              attachments: message.attachments || [],
-              metadata: message.metadata || {}
-            });
-          }
-        }
-      } catch (error) {
-        console.error('Error saving chat session to Supabase:', error);
-        // Fallback to localStorage
-        this.saveGuestSession(session);
-      }
-    } else {
-      // Guest user - save to localStorage
-      this.saveGuestSession(session);
-    }
+  static async loadUserSessions(userId: string): Promise<StoredSession[]> {
+    return loadUserSessions(userId);
   }
 
-  // Save guest session to localStorage
-  static saveGuestSession(session: ChatSession): void {
-    if (typeof window === 'undefined') return;
-    
+  // FIXED: createNewSession with proper async handling
+  static async createNewSession(userId: string, title: string): Promise<{ id: string } | null> {
     try {
-      const sessions = this.getGuestSessions();
-      const existingIndex = sessions.findIndex(s => s.id === session.id);
-      
-      if (existingIndex >= 0) {
-        sessions[existingIndex] = session;
-      } else {
-        sessions.unshift(session); // Add to beginning
-      }
-      
-      // Keep only latest sessions
-      const limitedSessions = sessions.slice(0, MAX_SESSIONS);
-      
-      localStorage.setItem(GUEST_STORAGE_KEY, JSON.stringify(limitedSessions));
+      const sessionId = await createNewChatSession(userId, title);
+      return sessionId ? { id: sessionId } : null;
     } catch (error) {
-      console.error('Error saving guest chat session:', error);
+      console.error('Error creating new session:', error);
+      return null;
     }
   }
 
-  // Delete session
-  static async deleteSession(sessionId: string, userId?: string): Promise<void> {
-    if (userId) {
-      // Authenticated user - delete from Supabase
-      try {
-        await deleteSessionFromDB(sessionId);
-      } catch (error) {
-        console.error('Error deleting session from Supabase:', error);
-      }
-    } else {
-      // Guest user - delete from localStorage
-      this.deleteGuestSession(sessionId);
-    }
+  static async deleteSession(sessionId: string): Promise<boolean> {
+    return deleteChatSession(sessionId);
   }
 
-  // Delete guest session from localStorage
-  static deleteGuestSession(sessionId: string): void {
-    if (typeof window === 'undefined') return;
-    
+  static async updateSessionTitle(sessionId: string, newTitle: string): Promise<boolean> {
+    return updateSessionTitle(sessionId, newTitle);
+  }
+
+  // FIXED: saveSession with single parameter
+  static async saveSession(session: ChatSession): Promise<void> {
     try {
-      const sessions = this.getGuestSessions();
-      const filteredSessions = sessions.filter(s => s.id !== sessionId);
-      localStorage.setItem(GUEST_STORAGE_KEY, JSON.stringify(filteredSessions));
+      await updateChatSession(session.id, {
+        title: session.title,
+        context_summary: session.context_summary,
+        settings: session.settings,
+        updated_at: new Date().toISOString()
+      });
     } catch (error) {
-      console.error('Error deleting guest session:', error);
+      console.error('Error saving session:', error);
+      throw error;
     }
   }
 
-  // Create new session
-  static createNewSession(title?: string, userId?: string): ChatSession {
-    return {
-      id: generateId(),
-      title: title || 'New Conversation',
-      messages: [],
-      createdAt: new Date(),
-      updatedAt: new Date(),
-      isArchived: false,
-      metadata: {}
-    };
-  }
+  // FIXED: getSessionById with proper return type
+  static async getSessionById(sessionId: string): Promise<ChatSession | null> {
+    try {
+      const session = await getSessionById(sessionId);
+      if (!session) return null;
 
-  // Add message to session
-  static async addMessageToSession(
-    sessionId: string, 
-    message: Omit<Message, 'id' | 'timestamp'>,
-    userId?: string
-  ): Promise<Message> {
-    const newMessage: Message = {
-      ...message,
-      id: generateId(),
-      timestamp: new Date()
-    };
-
-    if (userId) {
-      // Authenticated user - save to Supabase
-      try {
-        await createMessage({
-          id: newMessage.id,
-          session_id: sessionId,
-          role: newMessage.role,
-          content: newMessage.content,
-          timestamp: newMessage.timestamp.toISOString(),
-          attachments: newMessage.attachments || [],
-          metadata: newMessage.metadata || {}
-        });
-
-        // Update session timestamp
-        await updateChatSession(sessionId, {
-          updated_at: new Date().toISOString()
-        });
-      } catch (error) {
-        console.error('Error adding message to Supabase:', error);
-      }
-    } else {
-      // Guest user - update localStorage
-      const sessions = this.getGuestSessions();
-      const sessionIndex = sessions.findIndex(s => s.id === sessionId);
+      // Load messages for this session
+      const messages = await ChatStorage.loadSessionMessages(sessionId);
       
-      if (sessionIndex >= 0) {
-        sessions[sessionIndex].messages.push(newMessage);
-        sessions[sessionIndex].updatedAt = new Date();
-        this.saveGuestSession(sessions[sessionIndex]);
-      }
-    }
-
-    return newMessage;
-  }
-
-  // Get session by ID
-  static async getSessionById(sessionId: string, userId?: string): Promise<ChatSession | null> {
-    const sessions = await this.getSessions(userId);
-    return sessions.find(s => s.id === sessionId) || null;
-  }
-
-  // Update session title
-  static async updateSessionTitle(
-    sessionId: string, 
-    title: string, 
-    userId?: string
-  ): Promise<void> {
-    if (userId) {
-      // Authenticated user - update in Supabase
-      try {
-        await updateChatSession(sessionId, { title });
-      } catch (error) {
-        console.error('Error updating session title in Supabase:', error);
-      }
-    } else {
-      // Guest user - update in localStorage
-      const sessions = this.getGuestSessions();
-      const sessionIndex = sessions.findIndex(s => s.id === sessionId);
-      
-      if (sessionIndex >= 0) {
-        sessions[sessionIndex].title = title;
-        sessions[sessionIndex].updatedAt = new Date();
-        this.saveGuestSession(sessions[sessionIndex]);
-      }
+      return {
+        ...session,
+        updatedAt: session.updated_at,
+        messages: messages
+      };
+    } catch (error) {
+      console.error('Error getting session by ID:', error);
+      return null;
     }
   }
 
-  // Archive/unarchive session
-  static async archiveSession(
-    sessionId: string, 
-    archived: boolean, 
-    userId?: string
-  ): Promise<void> {
-    if (userId) {
-      // Authenticated user - update in Supabase
-      try {
-        await updateChatSession(sessionId, { is_archived: archived });
-      } catch (error) {
-        console.error('Error archiving session in Supabase:', error);
-      }
-    } else {
-      // Guest user - update in localStorage
-      const sessions = this.getGuestSessions();
-      const sessionIndex = sessions.findIndex(s => s.id === sessionId);
-      
-      if (sessionIndex >= 0) {
-        sessions[sessionIndex].isArchived = archived;
-        sessions[sessionIndex].updatedAt = new Date();
-        this.saveGuestSession(sessions[sessionIndex]);
-      }
-    }
+  // Message management
+  static async saveMessage(
+    sessionId: string,
+    userId: string | undefined, // FIXED: Accept undefined
+    role: 'user' | 'assistant',
+    content: string,
+    attachments: any[] = [],
+    metadata: any = {}
+  ): Promise<string | null> {
+    return saveMessage(sessionId, userId || null, role, content, attachments, metadata);
   }
 
-  // Export sessions (for backup/migration)
-  static async exportSessions(userId?: string): Promise<string> {
-    const sessions = await this.getSessions(userId);
-    return JSON.stringify({
-      sessions,
-      exportedAt: new Date().toISOString(),
-      version: '1.0'
+  static async loadSessionMessages(sessionId: string): Promise<Message[]> {
+    const messages = await loadSessionMessages(sessionId);
+    return messages.map(msg => ({
+      ...msg,
+      timestamp: new Date(msg.timestamp)
+    }));
+  }
+
+  // Context management
+  static async updateConversationContext(sessionId: string, summary: string): Promise<void> {
+    return updateConversationContext(sessionId, summary);
+  }
+
+  static async getConversationContext(sessionId: string): Promise<string | null> {
+    return getConversationContext(sessionId);
+  }
+
+  // Search functionality
+  static async searchSessions(userId: string, query: string): Promise<ChatSession[]> {
+    const storedSessions = await searchUserSessions(userId, query);
+    return storedSessions.map(stored => ({
+      id: stored.id,
+      user_id: userId,
+      title: stored.title,
+      message_count: stored.messageCount,
+      last_message_at: stored.timestamp,
+      context_summary: stored.lastMessage,
+      settings: {},
+      is_active: stored.isActive,
+      created_at: stored.timestamp,
+      updated_at: stored.timestamp,
+      updatedAt: stored.timestamp,
+      messages: []
+    }));
+  }
+
+  static async searchMessages(sessionId: string, query: string): Promise<Message[]> {
+    const messages = await searchSessionMessages(sessionId, query);
+    return messages.map(msg => ({
+      ...msg,
+      timestamp: new Date(msg.timestamp)
+    }));
+  }
+
+  // Export/Import
+  static async exportSession(sessionId: string): Promise<string | null> {
+    return exportSession(sessionId);
+  }
+
+  static async exportAllSessions(userId: string): Promise<string | null> {
+    return exportAllUserSessions(userId);
+  }
+
+  // Statistics
+  static async getUserStats(userId: string) {
+    return getUserChatStats(userId);
+  }
+
+  // Cleanup
+  static async cleanup(userId: string, keepDays: number = 30): Promise<number> {
+    return cleanupOldSessions(userId, keepDays);
+  }
+}
+
+// ========================================
+// SESSION MANAGEMENT FUNCTIONS
+// ========================================
+
+export async function loadUserSessions(userId: string): Promise<StoredSession[]> {
+  try {
+    const sessions = await getUserSessions(userId);
+    
+    return sessions.map((session: any) => ({
+      id: session.id,
+      title: session.title,
+      lastMessage: session.context_summary || 'No messages yet',
+      timestamp: session.updated_at,
+      messageCount: session.message_count,
+      isActive: session.is_active
+    }));
+  } catch (error) {
+    console.error('Error loading user sessions:', error);
+    return [];
+  }
+}
+
+export async function createNewChatSession(userId: string, title: string): Promise<string | null> {
+  try {
+    const session = await createChatSession(userId, title);
+    return session?.id || null;
+  } catch (error) {
+    console.error('Error creating new chat session:', error);
+    return null;
+  }
+}
+
+export async function deleteChatSession(sessionId: string): Promise<boolean> {
+  try {
+    return await deleteSession(sessionId);
+  } catch (error) {
+    console.error('Error deleting chat session:', error);
+    return false;
+  }
+}
+
+export async function updateSessionTitle(sessionId: string, newTitle: string): Promise<boolean> {
+  try {
+    await updateChatSession(sessionId, { title: newTitle });
+    return true;
+  } catch (error) {
+    console.error('Error updating session title:', error);
+    return false;
+  }
+}
+
+// ========================================
+// MESSAGE MANAGEMENT FUNCTIONS
+// ========================================
+
+export async function saveMessage(
+  sessionId: string,
+  userId: string | null,
+  role: 'user' | 'assistant',
+  content: string,
+  attachments: any[] = [],
+  metadata: any = {}
+): Promise<string | null> {
+  try {
+    const message = await createMessage({
+      session_id: sessionId,
+      user_id: userId || undefined,
+      role,
+      content,
+      attachments,
+      tokens_used: metadata.tokensUsed || 0,
+      model_used: metadata.modelUsed || 'gemini-1.5-flash',
+      processing_time_ms: metadata.processingTime || 0,
+      metadata
     });
-  }
 
-  // Import sessions (for backup/migration)
-  static async importSessions(
-    data: string, 
-    userId?: string, 
-    merge: boolean = false
-  ): Promise<{ success: boolean; imported: number; errors: number }> {
-    try {
-      const parsed = JSON.parse(data);
-      const importedSessions: ChatSession[] = parsed.sessions || [];
-      
-      let imported = 0;
-      let errors = 0;
-
-      if (!merge) {
-        // Clear existing sessions first
-        if (userId) {
-          const existingSessions = await getUserSessions(userId);
-          for (const session of existingSessions) {
-            await this.deleteSession(session.id, userId);
-          }
-        } else {
-          localStorage.removeItem(GUEST_STORAGE_KEY);
-        }
-      }
-
-      // Import each session
-      for (const session of importedSessions) {
-        try {
-          await this.saveSession(session, userId);
-          imported++;
-        } catch (error) {
-          console.error('Error importing session:', error);
-          errors++;
-        }
-      }
-
-      return { success: true, imported, errors };
-    } catch (error) {
-      console.error('Error importing sessions:', error);
-      return { success: false, imported: 0, errors: 1 };
+    if (message) {
+      await updateChatSession(sessionId, {
+        last_message_at: new Date().toISOString(),
+        message_count: await getSessionMessageCount(sessionId)
+      });
     }
-  }
 
-  // Clean up old sessions (keep only recent ones)
-  static async cleanupOldSessions(
-    keepCount: number = MAX_SESSIONS, 
-    userId?: string
-  ): Promise<number> {
-    const sessions = await this.getSessions(userId);
+    return message?.id || null;
+  } catch (error) {
+    console.error('Error saving message:', error);
+    return null;
+  }
+}
+
+export async function loadSessionMessages(sessionId: string): Promise<MessageWithFiles[]> {
+  try {
+    const messages = await getSessionMessages(sessionId);
     
-    if (sessions.length <= keepCount) {
+    return messages.map((msg: any) => ({
+      id: msg.id,
+      role: msg.role as 'user' | 'assistant',
+      content: msg.content,
+      timestamp: msg.created_at,
+      attachments: msg.attachments || [],
+      tokens_used: msg.tokens_used,
+      model_used: msg.model_used
+    }));
+  } catch (error) {
+    console.error('Error loading session messages:', error);
+    return [];
+  }
+}
+
+async function getSessionMessageCount(sessionId: string): Promise<number> {
+  try {
+    const { count, error } = await supabaseAdmin
+      .from('messages')
+      .select('*', { count: 'exact', head: true })
+      .eq('session_id', sessionId);
+
+    if (error) {
+      console.error('Error getting message count:', error);
       return 0;
     }
 
-    // Sort by update date and keep only the most recent
-    const sortedSessions = sessions.sort((a, b) => 
-      b.updatedAt.getTime() - a.updatedAt.getTime()
-    );
-    
-    const sessionsToDelete = sortedSessions.slice(keepCount);
-    
-    for (const session of sessionsToDelete) {
-      await this.deleteSession(session.id, userId);
+    return count || 0;
+  } catch (error) {
+    console.error('Exception in getSessionMessageCount:', error);
+    return 0;
+  }
+}
+
+// ========================================
+// CONVERSATION CONTEXT MANAGEMENT
+// ========================================
+
+export async function updateConversationContext(
+  sessionId: string, 
+  summary: string
+): Promise<void> {
+  try {
+    await updateChatSession(sessionId, {
+      context_summary: summary,
+      updated_at: new Date().toISOString()
+    });
+  } catch (error) {
+    console.error('Error updating conversation context:', error);
+  }
+}
+
+export async function getConversationContext(sessionId: string): Promise<string | null> {
+  try {
+    const { data: session, error } = await supabaseAdmin
+      .from('chat_sessions')
+      .select('context_summary')
+      .eq('id', sessionId)
+      .single();
+
+    if (error) {
+      console.error('Error getting conversation context:', error);
+      return null;
+    }
+
+    return session?.context_summary || null;
+  } catch (error) {
+    console.error('Exception in getConversationContext:', error);
+    return null;
+  }
+}
+
+// ========================================
+// SEARCH AND FILTERING
+// ========================================
+
+export async function searchUserSessions(
+  userId: string, 
+  query: string
+): Promise<StoredSession[]> {
+  try {
+    const { data: sessions, error } = await supabaseAdmin
+      .from('chat_sessions')
+      .select('*')
+      .eq('user_id', userId)
+      .eq('is_active', true)
+      .or(`title.ilike.%${query}%,context_summary.ilike.%${query}%`)
+      .order('updated_at', { ascending: false })
+      .limit(20);
+
+    if (error) {
+      console.error('Error searching sessions:', error);
+      return [];
+    }
+
+    return sessions?.map((session: any) => ({
+      id: session.id,
+      title: session.title,
+      lastMessage: session.context_summary || 'No messages yet',
+      timestamp: session.updated_at,
+      messageCount: session.message_count,
+      isActive: session.is_active
+    })) || [];
+  } catch (error) {
+    console.error('Exception in searchUserSessions:', error);
+    return [];
+  }
+}
+
+export async function searchSessionMessages(
+  sessionId: string, 
+  query: string
+): Promise<MessageWithFiles[]> {
+  try {
+    const { data: messages, error } = await supabaseAdmin
+      .from('messages')
+      .select('*')
+      .eq('session_id', sessionId)
+      .ilike('content', `%${query}%`)
+      .order('created_at', { ascending: true });
+
+    if (error) {
+      console.error('Error searching messages:', error);
+      return [];
+    }
+
+    return messages?.map((msg: any) => ({
+      id: msg.id,
+      role: msg.role as 'user' | 'assistant',
+      content: msg.content,
+      timestamp: msg.created_at,
+      attachments: msg.attachments || [],
+      tokens_used: msg.tokens_used,
+      model_used: msg.model_used
+    })) || [];
+  } catch (error) {
+    console.error('Exception in searchSessionMessages:', error);
+    return [];
+  }
+}
+
+// ========================================
+// EXPORT AND IMPORT
+// ========================================
+
+export async function exportSession(sessionId: string): Promise<string | null> {
+  try {
+    const { data: session, error: sessionError } = await supabaseAdmin
+      .from('chat_sessions')
+      .select('*')
+      .eq('id', sessionId)
+      .single();
+
+    if (sessionError || !session) {
+      console.error('Error getting session for export:', sessionError);
+      return null;
+    }
+
+    const messages = await loadSessionMessages(sessionId);
+
+    const exportData = {
+      session: {
+        id: session.id,
+        title: session.title,
+        created_at: session.created_at,
+        updated_at: session.updated_at,
+        message_count: session.message_count
+      },
+      messages,
+      exportedAt: new Date().toISOString(),
+      version: '2.0'
+    };
+
+    return JSON.stringify(exportData, null, 2);
+  } catch (error) {
+    console.error('Error exporting session:', error);
+    return null;
+  }
+}
+
+export async function exportAllUserSessions(userId: string): Promise<string | null> {
+  try {
+    const sessions = await loadUserSessions(userId);
+    const exportData = {
+      sessions: [] as any[],
+      exportedAt: new Date().toISOString(),
+      version: '2.0'
+    };
+
+    for (const session of sessions) {
+      const sessionExport = await exportSession(session.id);
+      if (sessionExport) {
+        exportData.sessions.push(JSON.parse(sessionExport));
+      }
+    }
+
+    return JSON.stringify(exportData, null, 2);
+  } catch (error) {
+    console.error('Error exporting all sessions:', error);
+    return null;
+  }
+}
+
+// ========================================
+// STATISTICS AND ANALYTICS
+// ========================================
+
+export async function getUserChatStats(userId: string): Promise<{
+  totalSessions: number;
+  totalMessages: number;
+  averageMessagesPerSession: number;
+  lastActiveSession: string | null;
+}> {
+  try {
+    const [sessionsCount, messagesCount] = await Promise.all([
+      supabaseAdmin
+        .from('chat_sessions')
+        .select('*', { count: 'exact', head: true })
+        .eq('user_id', userId)
+        .eq('is_active', true),
+      supabaseAdmin
+        .from('messages')
+        .select('*', { count: 'exact', head: true })
+        .eq('user_id', userId)
+    ]);
+
+    const { data: lastSession } = await supabaseAdmin
+      .from('chat_sessions')
+      .select('id, title, updated_at')
+      .eq('user_id', userId)
+      .eq('is_active', true)
+      .order('updated_at', { ascending: false })
+      .limit(1)
+      .single();
+
+    const totalSessions = sessionsCount.count || 0;
+    const totalMessages = messagesCount.count || 0;
+
+    return {
+      totalSessions,
+      totalMessages,
+      averageMessagesPerSession: totalSessions > 0 ? Math.round(totalMessages / totalSessions) : 0,
+      lastActiveSession: lastSession?.title || null
+    };
+  } catch (error) {
+    console.error('Error getting user chat stats:', error);
+    return {
+      totalSessions: 0,
+      totalMessages: 0,
+      averageMessagesPerSession: 0,
+      lastActiveSession: null
+    };
+  }
+}
+
+// ========================================
+// CLEANUP FUNCTIONS
+// ========================================
+
+export async function cleanupOldSessions(userId: string, keepDays: number = 30): Promise<number> {
+  try {
+    const cutoffDate = new Date();
+    cutoffDate.setDate(cutoffDate.getDate() - keepDays);
+
+    const { data: sessionsToDelete, error: fetchError } = await supabaseAdmin
+      .from('chat_sessions')
+      .select('id')
+      .eq('user_id', userId)
+      .lt('updated_at', cutoffDate.toISOString());
+
+    if (fetchError) {
+      console.error('Error fetching old sessions:', fetchError);
+      return 0;
+    }
+
+    if (!sessionsToDelete || sessionsToDelete.length === 0) {
+      return 0;
+    }
+
+    const { error: deleteError } = await supabaseAdmin
+      .from('chat_sessions')
+      .update({ is_active: false })
+      .in('id', sessionsToDelete.map(s => s.id));
+
+    if (deleteError) {
+      console.error('Error cleaning up old sessions:', deleteError);
+      return 0;
     }
 
     return sessionsToDelete.length;
-  }
-
-  // Search sessions by content
-  static async searchSessions(
-    query: string, 
-    userId?: string
-  ): Promise<ChatSession[]> {
-    const sessions = await this.getSessions(userId);
-    const lowerQuery = query.toLowerCase();
-    
-    return sessions.filter(session => {
-      // Search in title
-      if (session.title.toLowerCase().includes(lowerQuery)) {
-        return true;
-      }
-      
-      // Search in messages
-      return session.messages.some(message => 
-        message.content.toLowerCase().includes(lowerQuery)
-      );
-    });
+  } catch (error) {
+    console.error('Exception in cleanupOldSessions:', error);
+    return 0;
   }
 }
+
+// ========================================
+// ADDITIONAL HELPER FUNCTIONS
+// ========================================
+
+export async function getSessionById(sessionId: string): Promise<ChatSession | null> {
+  try {
+    const { data: session, error } = await supabaseAdmin
+      .from('chat_sessions')
+      .select('*')
+      .eq('id', sessionId)
+      .single();
+
+    if (error) {
+      console.error('Error getting session by ID:', error);
+      return null;
+    }
+
+    return {
+      ...session,
+      updatedAt: session.updated_at
+    };
+  } catch (error) {
+    console.error('Exception in getSessionById:', error);
+    return null;
+  }
+}
+
+export async function updateSessionActivity(sessionId: string): Promise<void> {
+  try {
+    await updateChatSession(sessionId, {
+      last_message_at: new Date().toISOString()
+    });
+  } catch (error) {
+    console.error('Error updating session activity:', error);
+  }
+}
+
+export async function archiveSession(sessionId: string): Promise<boolean> {
+  try {
+    const { error } = await supabaseAdmin
+      .from('chat_sessions')
+      .update({ 
+        is_active: false,
+        updated_at: new Date().toISOString()
+      })
+      .eq('id', sessionId);
+
+    if (error) {
+      console.error('Error archiving session:', error);
+      return false;
+    }
+
+    return true;
+  } catch (error) {
+    console.error('Exception in archiveSession:', error);
+    return false;
+  }
+}
+
+export async function restoreSession(sessionId: string): Promise<boolean> {
+  try {
+    const { error } = await supabaseAdmin
+      .from('chat_sessions')
+      .update({ 
+        is_active: true,
+        updated_at: new Date().toISOString()
+      })
+      .eq('id', sessionId);
+
+    if (error) {
+      console.error('Error restoring session:', error);
+      return false;
+    }
+
+    return true;
+  } catch (error) {
+    console.error('Exception in restoreSession:', error);
+    return false;
+  }
+}
+
+// ========================================
+// DEFAULT EXPORT
+// ========================================
+
+export default ChatStorage;

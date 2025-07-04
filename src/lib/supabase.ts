@@ -1,81 +1,41 @@
+// src/lib/supabase.ts - FINAL COMPLETE VERSION WITH ALL EXPORTS
 import { createClient } from '@supabase/supabase-js';
-import { Database } from '@/types/supabase';
+import type { Database } from '@/types/supabase';
 
 // ========================================
-// PRODUCTION-READY SECURITY CONFIGURATION
+// ENVIRONMENT VARIABLES
 // ========================================
 
-// Environment variables - STRICT validation
-const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL;
-const supabaseAnonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
-const supabaseServiceKey = process.env.SUPABASE_SERVICE_ROLE_KEY; // Server-only
+const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL!;
+const supabaseAnonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!;
+const supabaseServiceKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
 
-// CRITICAL: Validate required public variables
 if (!supabaseUrl || !supabaseAnonKey) {
-  const missing = [
-    !supabaseUrl && 'NEXT_PUBLIC_SUPABASE_URL',
-    !supabaseAnonKey && 'NEXT_PUBLIC_SUPABASE_ANON_KEY'
-  ].filter(Boolean);
-  
-  throw new Error(`Missing required environment variables: ${missing.join(', ')}`);
-}
-
-// Detect environment
-const isServer = typeof window === 'undefined';
-const isBrowser = !isServer;
-const isProduction = process.env.NODE_ENV === 'production';
-
-// Security logging (only in development)
-if (!isProduction) {
-  console.log('🔐 Supabase Security Check:');
-  console.log('Environment:', isServer ? 'Server' : 'Browser');
-  console.log('NEXT_PUBLIC_SUPABASE_URL:', supabaseUrl);
-  console.log('NEXT_PUBLIC_SUPABASE_ANON_KEY:', !!supabaseAnonKey ? 'Present' : 'Missing');
-  console.log('SUPABASE_SERVICE_ROLE_KEY:', !!supabaseServiceKey ? 'Present (Server)' : 'Not Available');
-  
-  // SECURITY WARNING for development
-  if (isBrowser && supabaseServiceKey) {
-    console.warn('🚨 WARNING: Service key should NOT be available in browser!');
-  }
+  throw new Error('Missing Supabase environment variables');
 }
 
 // ========================================
-// SECURE CLIENT CONFIGURATION
+// SUPABASE CLIENTS
 // ========================================
 
-/**
- * PUBLIC CLIENT - Browser Safe
- * - Uses anon key only (public, limited access)
- * - Subject to Row Level Security (RLS)
- * - Safe to use in browser/client-side code
- */
+// Public client for browser use
 export const supabase = createClient<Database>(supabaseUrl, supabaseAnonKey, {
   auth: {
-    autoRefreshToken: false,
-    persistSession: false,
-  },
-  realtime: {
-    params: {
-      eventsPerSecond: 10,
-    },
+    autoRefreshToken: true,
+    persistSession: true,
+    detectSessionInUrl: true,
   },
   global: {
     headers: {
-      'X-Client-Info': `ai-chatbot-client/${isServer ? 'server' : 'browser'}`,
+      'X-Client-Info': 'ai-chatbot-public/2.0',
     },
   },
 });
 
-/**
- * ADMIN CLIENT - Server Only
- * - Uses service key when available (server-side only)
- * - Falls back to anon key for safety
- * - NEVER exposed to browser
- */
+// Admin client for server-side operations
 export const supabaseAdmin = createClient<Database>(
   supabaseUrl,
-  // SECURITY: Only use service key on server-side
-  isServer && supabaseServiceKey ? supabaseServiceKey : supabaseAnonKey,
+  supabaseServiceKey || supabaseAnonKey,
   {
     auth: {
       autoRefreshToken: false,
@@ -83,122 +43,83 @@ export const supabaseAdmin = createClient<Database>(
     },
     global: {
       headers: {
-        'X-Client-Info': `ai-chatbot-admin/${isServer ? 'server' : 'browser-fallback'}`,
+        'X-Client-Info': 'ai-chatbot-admin/2.0',
       },
     },
   }
 );
 
-// Security validation in production
-if (isProduction && isBrowser && supabaseServiceKey) {
-  // This should NEVER happen in production
-  console.error('🚨 SECURITY BREACH: Service key exposed to browser in production!');
+// ========================================
+// INTERFACES FOR PROPER TYPING
+// ========================================
+
+interface MessageData {
+  session_id: string;
+  user_id?: string | null;
+  role: string;
+  content: string;
+  attachments?: any[];
+  tokens_used?: number;
+  model_used?: string;
+  processing_time_ms?: number;
+  metadata?: any;
+}
+
+interface SessionData {
+  user_id: string;
+  title: string;
+  message_count?: number;
+  is_active?: boolean;
+  context_summary?: string;
+  settings?: any;
 }
 
 // ========================================
-// SECURE HELPER FUNCTIONS
+// USER MANAGEMENT FUNCTIONS
 // ========================================
 
-/**
- * Get user by email - SERVER-SIDE ONLY
- * Uses admin client for elevated permissions
- */
-export const getUserByEmail = async (email: string): Promise<User | null> => {
-  // Security check: This should only run on server
-  if (isBrowser) {
-    console.error('🚨 Security violation: getUserByEmail called from browser');
-    return null;
-  }
-
+export const getUserByEmail = async (email: string): Promise<any> => {
   try {
-    const { data, error } = await supabaseAdmin
+    const { data: user, error } = await supabaseAdmin
       .from('users')
       .select('*')
       .eq('email', email)
-      .eq('is_active', true)
       .single();
 
-    if (error) {
-      console.error('Error getting user by email:', error.message);
+    if (error && error.code !== 'PGRST116') {
+      console.error('Error getting user by email:', error);
       return null;
     }
 
-    return data;
+    return user;
   } catch (error) {
     console.error('Exception in getUserByEmail:', error);
     return null;
   }
 };
 
-/**
- * Get user by ID - SERVER-SIDE ONLY
- * Uses admin client for elevated permissions
- */
-export const getUserById = async (id: string): Promise<User | null> => {
-  // Security check: This should only run on server
-  if (isBrowser) {
-    console.error('🚨 Security violation: getUserById called from browser');
-    return null;
-  }
-
+export const getUserById = async (id: string): Promise<any> => {
   try {
-    const { data, error } = await supabaseAdmin
+    const { data: user, error } = await supabaseAdmin
       .from('users')
       .select('*')
       .eq('id', id)
-      .eq('is_active', true)
       .single();
 
     if (error) {
-      console.error('Error getting user by ID:', error.message);
+      console.error('Error getting user by ID:', error);
       return null;
     }
 
-    return data;
+    return user;
   } catch (error) {
     console.error('Exception in getUserById:', error);
     return null;
   }
 };
 
-/**
- * Create user - SERVER-SIDE ONLY
- * Admin operation with elevated permissions
- */
-export const createUser = async (userData: UserInsert): Promise<User | null> => {
-  if (isBrowser) {
-    console.error('🚨 Security violation: createUser called from browser');
-    return null;
-  }
-
-  try {
-    const { data, error } = await supabaseAdmin
-      .from('users')
-      .insert(userData)
-      .select()
-      .single();
-
-    if (error) {
-      console.error('Error creating user:', error.message);
-      return null;
-    }
-
-    return data;
-  } catch (error) {
-    console.error('Exception in createUser:', error);
-    return null;
-  }
-};
-
-/**
- * Update user last login - SERVER-SIDE ONLY
- */
+// FIXED: updateUserLastLogin function
 export const updateUserLastLogin = async (userId: string): Promise<void> => {
-  if (isBrowser) {
-    console.error('🚨 Security violation: updateUserLastLogin called from browser');
-    return;
-  }
-
   try {
     await supabaseAdmin
       .from('users')
@@ -212,232 +133,216 @@ export const updateUserLastLogin = async (userId: string): Promise<void> => {
   }
 };
 
-/**
- * Increment message count - SERVER-SIDE ONLY
- */
-export const incrementMessageCount = async (userId: string): Promise<void> => {
-  if (isBrowser) {
-    console.error('🚨 Security violation: incrementMessageCount called from browser');
-    return;
-  }
-
-  try {
-    await supabaseAdmin.rpc('increment_message_count', { user_id: userId });
-  } catch (error) {
-    console.error('Error incrementing message count:', error);
-  }
-};
-
 // ========================================
-// CLIENT-SAFE FUNCTIONS (Browser + Server)
+// SESSION MANAGEMENT FUNCTIONS
 // ========================================
 
-/**
- * Get user sessions - Uses public client (RLS protected)
- * Safe for both browser and server
- */
-export async function getUserSessions(userId?: string) {
-  if (!userId) return [];
-  
+export const createChatSession = async (userId: string, title: string): Promise<any> => {
   try {
-    const { data, error } = await supabase
-      .from('chat_sessions')
-      .select('*')
-      .eq('user_id', userId)
-      .order('updated_at', { ascending: false });
-    
-    if (error) {
-      console.error('Error getting user sessions:', error.message);
-      return [];
-    }
-    
-    return data || [];
-  } catch (error) {
-    console.error('Exception in getUserSessions:', error);
-    return [];
-  }
-}
+    const sessionData: SessionData = {
+      user_id: userId,
+      title,
+      message_count: 0,
+      is_active: true,
+    };
 
-/**
- * Create chat session - Uses public client (RLS protected)
- */
-export async function createChatSession(userId: string, title: string) {
-  try {
-    const { data, error } = await supabase
+    const { data: session, error } = await supabaseAdmin
       .from('chat_sessions')
-      .insert({
-        user_id: userId,
-        title,
-        session_data: {}
-      })
+      .insert(sessionData)
       .select()
       .single();
-    
+
     if (error) {
-      console.error('Error creating chat session:', error.message);
+      console.error('Error creating chat session:', error);
       return null;
     }
-    
-    return data;
+
+    return session;
   } catch (error) {
     console.error('Exception in createChatSession:', error);
     return null;
   }
-}
+};
 
-/**
- * Update chat session - Uses public client (RLS protected)
- */
-export async function updateChatSession(sessionId: string, updates: any) {
+export const updateChatSession = async (sessionId: string, updates: any): Promise<void> => {
   try {
-    const { data, error } = await supabase
+    await supabaseAdmin
       .from('chat_sessions')
-      .update(updates)
-      .eq('id', sessionId)
-      .select()
-      .single();
-    
-    if (error) {
-      console.error('Error updating chat session:', error.message);
-      return null;
-    }
-    
-    return data;
+      .update({
+        ...updates,
+        updated_at: new Date().toISOString()
+      })
+      .eq('id', sessionId);
   } catch (error) {
-    console.error('Exception in updateChatSession:', error);
-    return null;
+    console.error('Error updating chat session:', error);
   }
-}
+};
 
-/**
- * Get session messages - Uses public client (RLS protected)
- */
-export async function getSessionMessages(sessionId: string) {
+// FIXED: getUserSessions function
+export const getUserSessions = async (userId: string): Promise<any[]> => {
   try {
-    const { data, error } = await supabase
-      .from('messages')
+    const { data: sessions, error } = await supabaseAdmin
+      .from('chat_sessions')
       .select('*')
-      .eq('session_id', sessionId)
-      .order('created_at', { ascending: true });
-    
+      .eq('user_id', userId)
+      .eq('is_active', true)
+      .order('updated_at', { ascending: false })
+      .limit(50);
+
     if (error) {
-      console.error('Error getting session messages:', error.message);
+      console.error('Error fetching user sessions:', error);
       return [];
     }
-    
-    return data || [];
+
+    return sessions || [];
   } catch (error) {
-    console.error('Exception in getSessionMessages:', error);
+    console.error('Exception in getUserSessions:', error);
     return [];
   }
-}
+};
 
-/**
- * Create message - Uses public client (RLS protected)
- */
-export async function createMessage(messageData: any) {
+// FIXED: deleteSession function
+export const deleteSession = async (sessionId: string): Promise<boolean> => {
   try {
-    const { data, error } = await supabase
-      .from('messages')
-      .insert(messageData)
-      .select()
-      .single();
-    
-    if (error) {
-      console.error('Error creating message:', error.message);
-      return null;
-    }
-    
-    return data;
-  } catch (error) {
-    console.error('Exception in createMessage:', error);
-    return null;
-  }
-}
-
-/**
- * Delete session - Uses public client (RLS protected)
- * Named export for ChatStorage.ts compatibility
- */
-export async function deleteSession(sessionId: string) {
-  try {
-    const { error } = await supabase
+    const { error } = await supabaseAdmin
       .from('chat_sessions')
-      .delete()
+      .update({ 
+        is_active: false,
+        updated_at: new Date().toISOString()
+      })
       .eq('id', sessionId);
-    
+
     if (error) {
-      console.error('Error deleting session:', error.message);
+      console.error('Error deleting session:', error);
       return false;
     }
-    
+
     return true;
   } catch (error) {
     console.error('Exception in deleteSession:', error);
     return false;
   }
-}
+};
 
-/**
- * Get user usage - Uses public client (RLS protected)
- */
-export async function getUserUsage(userId: string) {
+// ========================================
+// MESSAGE MANAGEMENT FUNCTIONS
+// ========================================
+
+export const createMessage = async (messageData: MessageData): Promise<any> => {
   try {
-    const { data, error } = await supabase
-      .from('usage_tracking')
-      .select('*')
-      .eq('user_id', userId)
-      .single();
-    
-    if (error || !data) {
-      // Return default usage if no data found
-      return {
-        messageCount: 0,
-        fileUploads: 0,
-        remainingQuota: 100,
-        storageUsage: 0
-      };
-    }
-    
-    return {
-      messageCount: data.message_count || 0,
-      fileUploads: data.file_uploads || 0,
-      remainingQuota: Math.max(0, 100 - (data.message_count || 0)),
-      storageUsage: 0
+    // Ensure user_id is properly typed
+    const cleanMessageData = {
+      session_id: messageData.session_id,
+      user_id: messageData.user_id || null,
+      role: messageData.role,
+      content: messageData.content,
+      attachments: messageData.attachments || [],
+      tokens_used: messageData.tokens_used || 0,
+      model_used: messageData.model_used || 'gemini-1.5-flash',
+      processing_time_ms: messageData.processing_time_ms || 0,
+      metadata: messageData.metadata || {},
     };
-  } catch (error) {
-    console.error('Exception in getUserUsage:', error);
-    return {
-      messageCount: 0,
-      fileUploads: 0,
-      remainingQuota: 100,
-      storageUsage: 0
-    };
-  }
-}
 
-/**
- * Track usage - Uses public client (RLS protected)
- */
-export async function trackUsage(userId: string, type: 'message' | 'file_upload') {
+    const { data: message, error } = await supabaseAdmin
+      .from('messages')
+      .insert(cleanMessageData)
+      .select()
+      .single();
+
+    if (error) {
+      console.error('Error creating message:', error);
+      return null;
+    }
+
+    return message;
+  } catch (error) {
+    console.error('Exception in createMessage:', error);
+    return null;
+  }
+};
+
+export const getSessionMessages = async (sessionId: string, limit: number = 100): Promise<any[]> => {
+  try {
+    const { data: messages, error } = await supabaseAdmin
+      .from('messages')
+      .select('*')
+      .eq('session_id', sessionId)
+      .order('created_at', { ascending: true })
+      .limit(limit);
+
+    if (error) {
+      console.error('Error fetching session messages:', error);
+      return [];
+    }
+
+    return messages || [];
+  } catch (error) {
+    console.error('Exception in getSessionMessages:', error);
+    return [];
+  }
+};
+
+// ========================================
+// USAGE TRACKING FUNCTIONS
+// ========================================
+
+export const getUserUsage = async (userId: string): Promise<{
+  messageCount: number;
+  fileUploads: number;
+  storageUsed: number;
+  tokensUsed: number;
+}> => {
   try {
     const today = new Date().toISOString().split('T')[0];
     
-    // Try to get existing record
-    const { data: existing } = await supabase
+    const { data: usage, error } = await supabaseAdmin
       .from('usage_tracking')
       .select('*')
       .eq('user_id', userId)
       .eq('date', today)
       .single();
+
+    if (error && error.code !== 'PGRST116') {
+      console.error('Error fetching user usage:', error);
+      return { messageCount: 0, fileUploads: 0, storageUsed: 0, tokensUsed: 0 };
+    }
+
+    return {
+      messageCount: usage?.message_count || 0,
+      fileUploads: usage?.file_uploads || 0,
+      storageUsed: usage?.storage_used || 0,
+      tokensUsed: usage?.tokens_used || 0,
+    };
+  } catch (error) {
+    console.error('Exception in getUserUsage:', error);
+    return { messageCount: 0, fileUploads: 0, storageUsed: 0, tokensUsed: 0 };
+  }
+};
+
+export const trackUsage = async (userId: string, type: 'message' | 'file_upload', amount: number = 1): Promise<void> => {
+  try {
+    const today = new Date().toISOString().split('T')[0];
     
+    // Get existing usage record
+    const { data: existing, error: fetchError } = await supabaseAdmin
+      .from('usage_tracking')
+      .select('*')
+      .eq('user_id', userId)
+      .eq('date', today)
+      .single();
+
+    if (fetchError && fetchError.code !== 'PGRST116') {
+      console.error('Error fetching existing usage:', fetchError);
+      return;
+    }
+
     if (existing) {
       // Update existing record
       const updates = type === 'message' 
-        ? { message_count: (existing.message_count || 0) + 1 }
-        : { file_uploads: (existing.file_uploads || 0) + 1 };
+        ? { message_count: (existing.message_count || 0) + amount }
+        : { file_uploads: (existing.file_uploads || 0) + amount };
       
-      await supabase
+      await supabaseAdmin
         .from('usage_tracking')
         .update(updates)
         .eq('id', existing.id);
@@ -446,18 +351,213 @@ export async function trackUsage(userId: string, type: 'message' | 'file_upload'
       const newRecord = {
         user_id: userId,
         date: today,
-        message_count: type === 'message' ? 1 : 0,
-        file_uploads: type === 'file_upload' ? 1 : 0
+        message_count: type === 'message' ? amount : 0,
+        file_uploads: type === 'file_upload' ? amount : 0,
+        storage_used: 0,
+        tokens_used: 0,
       };
       
-      await supabase
+      await supabaseAdmin
         .from('usage_tracking')
         .insert(newRecord);
     }
   } catch (error) {
     console.error('Exception in trackUsage:', error);
   }
-}
+};
+
+// ========================================
+// FILE ATTACHMENT FUNCTIONS
+// ========================================
+
+export const createFileAttachment = async (data: {
+  message_id?: string;
+  user_id: string;
+  filename: string;
+  original_name: string;
+  file_path: string;
+  blob_url?: string;
+  mime_type: string;
+  file_size: number;
+  file_hash?: string;
+  processing_status?: string;
+  ai_analysis?: any;
+}): Promise<any> => {
+  try {
+    const attachmentData = {
+      message_id: data.message_id || null,
+      user_id: data.user_id,
+      filename: data.filename,
+      original_name: data.original_name,
+      file_path: data.file_path,
+      blob_url: data.blob_url || data.file_path,
+      mime_type: data.mime_type,
+      file_size: data.file_size,
+      file_hash: data.file_hash || null,
+      processing_status: data.processing_status || 'completed',
+      ai_analysis: data.ai_analysis || {}
+    };
+
+    const { data: attachment, error } = await supabaseAdmin
+      .from('file_attachments')
+      .insert(attachmentData)
+      .select()
+      .single();
+
+    if (error) {
+      console.error('Error creating file attachment:', error);
+      return null;
+    }
+
+    return attachment;
+  } catch (error) {
+    console.error('Exception in createFileAttachment:', error);
+    return null;
+  }
+};
+
+// ========================================
+// ENHANCED FUNCTIONS
+// ========================================
+
+export const getUserUsageWithStorage = async (userId: string): Promise<{
+  messageCount: number;
+  fileUploads: number;
+  storageUsed: number;
+  tokensUsed: number;
+}> => {
+  return getUserUsage(userId); // Same implementation
+};
+
+export const updateSessionContext = async (sessionId: string, contextSummary: string): Promise<void> => {
+  try {
+    await updateChatSession(sessionId, {
+      context_summary: contextSummary
+    });
+  } catch (error) {
+    console.error('Error updating session context:', error);
+  }
+};
+
+export const getUserActiveSessions = async (userId: string): Promise<any[]> => {
+  return getUserSessions(userId); // Same implementation
+};
+
+export const cleanupExpiredGuestSessions = async (): Promise<void> => {
+  try {
+    const { error } = await supabaseAdmin
+      .from('guest_sessions')
+      .delete()
+      .lt('expires_at', new Date().toISOString());
+
+    if (error) {
+      console.error('Error cleaning up expired guest sessions:', error);
+    }
+  } catch (error) {
+    console.error('Exception in cleanupExpiredGuestSessions:', error);
+  }
+};
+
+export const getSystemStats = async (): Promise<{
+  totalUsers: number;
+  activeUsers: number;
+  totalMessages: number;
+  totalSessions: number;
+  storageUsed: number;
+  guestSessions: number;
+}> => {
+  try {
+    const [
+      { count: totalUsers },
+      { count: activeUsers },
+      { count: totalMessages },
+      { count: totalSessions },
+      { count: guestSessions }
+    ] = await Promise.all([
+      supabaseAdmin.from('users').select('*', { count: 'exact', head: true }),
+      supabaseAdmin.from('users').select('*', { count: 'exact', head: true }).eq('is_active', true),
+      supabaseAdmin.from('messages').select('*', { count: 'exact', head: true }),
+      supabaseAdmin.from('chat_sessions').select('*', { count: 'exact', head: true }).eq('is_active', true),
+      supabaseAdmin.from('guest_sessions').select('*', { count: 'exact', head: true }).gte('expires_at', new Date().toISOString())
+    ]);
+
+    // Get total storage used
+    const { data: storageData } = await supabaseAdmin
+      .from('file_attachments')
+      .select('file_size');
+    
+    const storageUsed = storageData?.reduce((sum, file) => sum + (file.file_size || 0), 0) || 0;
+
+    return {
+      totalUsers: totalUsers || 0,
+      activeUsers: activeUsers || 0,
+      totalMessages: totalMessages || 0,
+      totalSessions: totalSessions || 0,
+      storageUsed,
+      guestSessions: guestSessions || 0
+    };
+  } catch (error) {
+    console.error('Exception in getSystemStats:', error);
+    return {
+      totalUsers: 0,
+      activeUsers: 0,
+      totalMessages: 0,
+      totalSessions: 0,
+      storageUsed: 0,
+      guestSessions: 0
+    };
+  }
+};
+
+export const logError = async (errorData: {
+  user_id?: string;
+  session_id?: string;
+  error_type: string;
+  error_message: string;
+  error_stack?: string;
+  request_url?: string;
+  request_method?: string;
+  user_agent?: string;
+  ip_address?: string;
+  browser_info?: any;
+}): Promise<void> => {
+  try {
+    await supabaseAdmin
+      .from('error_reports')
+      .insert({
+        ...errorData,
+        browser_info: errorData.browser_info || {},
+        resolved: false
+      });
+  } catch (error) {
+    console.error('Error logging error:', error);
+  }
+};
+
+export const logSecurityEvent = async (eventData: {
+  event_type: string;
+  severity?: string;
+  ip_address?: string;
+  user_id?: string;
+  session_id?: string;
+  user_agent?: string;
+  request_path?: string;
+  request_method?: string;
+  details?: any;
+}): Promise<void> => {
+  try {
+    await supabaseAdmin
+      .from('security_events')
+      .insert({
+        ...eventData,
+        severity: eventData.severity || 'medium',
+        details: eventData.details || {},
+        resolved: false
+      });
+  } catch (error) {
+    console.error('Error logging security event:', error);
+  }
+};
 
 // ========================================
 // TYPE EXPORTS
@@ -481,15 +581,11 @@ export type FileAttachmentInsert = Database['public']['Tables']['file_attachment
 export type UsageTracking = Database['public']['Tables']['usage_tracking']['Row'];
 export type UsageTrackingInsert = Database['public']['Tables']['usage_tracking']['Insert'];
 
+export type GuestSession = Database['public']['Tables']['guest_sessions']['Row'];
+export type GuestSessionInsert = Database['public']['Tables']['guest_sessions']['Insert'];
+
 // ========================================
-// SECURITY AUDIT LOG
+// DEFAULT EXPORT
 // ========================================
 
-if (!isProduction) {
-  console.log('🛡️ Security audit complete:', {
-    environment: isServer ? 'server' : 'browser',
-    publicClientSecure: true,
-    adminClientSecure: isServer ? !!supabaseServiceKey : 'anon-fallback',
-    serviceKeyExposed: isBrowser && !!supabaseServiceKey ? '🚨 YES' : '✅ NO'
-  });
-}
+export default supabase;
