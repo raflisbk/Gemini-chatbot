@@ -1,23 +1,33 @@
-// src/lib/storage.ts - FIXED VERSION
-import { put, del } from '@vercel/blob';
-import { supabaseAdmin, createFileAttachment } from './supabase';
+// src/lib/storage.ts - COMPLETE FIXED VERSION WITH ALL EXPORTS
+
+import { supabase, supabaseAdmin } from './supabase';
+
+// ========================================
+// CONSTANTS
+// ========================================
+
+const MAX_FILE_SIZE = 10 * 1024 * 1024; // 10MB
+const ALLOWED_MIME_TYPES = [
+  // Images
+  'image/jpeg', 'image/png', 'image/gif', 'image/webp', 'image/svg+xml', 'image/bmp',
+  // Audio
+  'audio/mpeg', 'audio/wav', 'audio/ogg', 'audio/mp4', 'audio/webm', 'audio/m4a', 'audio/aac',
+  // Video
+  'video/mp4', 'video/webm', 'video/quicktime', 'video/x-msvideo', 'video/mkv',
+  // Documents
+  'application/pdf', 'text/plain', 'text/csv', 'text/markdown', 'application/json', 'application/xml', 'text/xml',
+  // Office documents
+  'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+  'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+  'application/vnd.openxmlformats-officedocument.presentationml.presentation',
+  'application/msword',
+  // Archives
+  'application/zip', 'application/x-rar-compressed', 'application/x-7z-compressed'
+];
 
 // ========================================
 // INTERFACES
 // ========================================
-
-export interface UploadResult {
-  success: boolean;
-  file?: {
-    id: string;
-    name: string;
-    url: string;
-    mimeType: string;
-    size: number;
-    base64?: string;
-  };
-  error?: string;
-}
 
 export interface StorageQuotaInfo {
   isOverQuota: boolean;
@@ -27,55 +37,30 @@ export interface StorageQuotaInfo {
   remainingStorage: number;
 }
 
-// ========================================
-// CONSTANTS
-// ========================================
-
-const MAX_FILE_SIZE = 10 * 1024 * 1024; // 10MB
-const ALLOWED_MIME_TYPES = [
-  // Images
-  'image/jpeg', 'image/png', 'image/gif', 'image/webp', 'image/svg+xml',
-  // Audio
-  'audio/mpeg', 'audio/wav', 'audio/ogg', 'audio/mp4', 'audio/webm',
-  // Video
-  'video/mp4', 'video/webm', 'video/quicktime', 'video/x-msvideo',
-  // Documents
-  'application/pdf', 'text/plain', 'text/csv', 'text/markdown',
-  'application/json', 'application/xml', 'text/xml',
-  // Office documents
-  'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
-  'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
-  'application/vnd.openxmlformats-officedocument.presentationml.presentation',
-];
-
-// ========================================
-// HELPER FUNCTIONS
-// ========================================
-
-function generateSafeFileName(originalName: string): string {
-  const timestamp = Date.now();
-  const randomString = Math.random().toString(36).substring(2, 15);
-  const extension = originalName.split('.').pop() || '';
-  const baseName = originalName.replace(/[^a-zA-Z0-9.-]/g, '_').substring(0, 50);
-  
-  return `${timestamp}_${randomString}_${baseName}${extension ? '.' + extension : ''}`;
+export interface FileValidationResult {
+  isValid: boolean;
+  error?: string;
 }
 
-async function convertFileToBase64(file: File): Promise<string> {
-  return new Promise((resolve, reject) => {
-    const reader = new FileReader();
-    reader.onload = () => {
-      const base64String = reader.result as string;
-      // Remove data URL prefix (data:image/jpeg;base64,)
-      const base64Data = base64String.split(',')[1];
-      resolve(base64Data);
-    };
-    reader.onerror = reject;
-    reader.readAsDataURL(file);
-  });
+export interface UserStorageUsage {
+  totalStorage: number;
+  usedStorage: number;
+  remainingStorage: number;
+  fileCount: number;
 }
 
-function validateFile(file: File): { isValid: boolean; error?: string } {
+export interface StorageQuotaCheck {
+  isOverQuota: boolean;
+  currentUsage: number;
+  limit: number;
+  remainingStorage: number;
+}
+
+// ========================================
+// FILE VALIDATION
+// ========================================
+
+export function validateFile(file: File): FileValidationResult {
   // Check file size
   if (file.size > MAX_FILE_SIZE) {
     return { 
@@ -104,10 +89,87 @@ function validateFile(file: File): { isValid: boolean; error?: string } {
 }
 
 // ========================================
-// STORAGE QUOTA MANAGEMENT
+// STORAGE QUOTA MANAGEMENT - FIXED EXPORTS
 // ========================================
 
-export async function checkStorageQuota(userId: string, fileSize: number): Promise<StorageQuotaInfo> {
+export async function getUserStorageUsage(userId: string): Promise<UserStorageUsage> {
+  try {
+    const { data: usage, error } = await supabaseAdmin
+      .from('usage_tracking')
+      .select('storage_used, file_uploads')
+      .eq('user_id', userId)
+      .single();
+
+    if (error && error.code !== 'PGRST116') {
+      throw error;
+    }
+
+    // Get user role for storage limits
+    const { data: user, error: userError } = await supabaseAdmin
+      .from('users')
+      .select('role')
+      .eq('id', userId)
+      .single();
+
+    if (userError) {
+      throw userError;
+    }
+
+    // Storage limits based on user role
+    const STORAGE_LIMITS = {
+      admin: 5 * 1024 * 1024 * 1024, // 5GB
+      user: 1 * 1024 * 1024 * 1024,  // 1GB
+      guest: 50 * 1024 * 1024        // 50MB
+    };
+
+    const userRole = user?.role as keyof typeof STORAGE_LIMITS || 'user';
+    const totalStorage = STORAGE_LIMITS[userRole];
+    const usedStorage = usage?.storage_used || 0;
+
+    return {
+      totalStorage,
+      usedStorage,
+      remainingStorage: Math.max(0, totalStorage - usedStorage),
+      fileCount: usage?.file_uploads || 0
+    };
+  } catch (error) {
+    console.error('Error getting user storage usage:', error);
+    return {
+      totalStorage: 1024 * 1024 * 1024, // 1GB default
+      usedStorage: 0,
+      remainingStorage: 1024 * 1024 * 1024,
+      fileCount: 0
+    };
+  }
+}
+
+export async function checkStorageQuota(userId: string, fileSize: number = 0): Promise<StorageQuotaCheck> {
+  try {
+    const storageInfo = await getUserStorageUsage(userId);
+    const totalAfterUpload = storageInfo.usedStorage + fileSize;
+    
+    return {
+      isOverQuota: totalAfterUpload >= storageInfo.totalStorage,
+      currentUsage: storageInfo.usedStorage,
+      limit: storageInfo.totalStorage,
+      remainingStorage: storageInfo.remainingStorage
+    };
+  } catch (error) {
+    console.error('Error checking storage quota:', error);
+    return {
+      isOverQuota: false,
+      currentUsage: 0,
+      limit: 1024 * 1024 * 1024, // 1GB default
+      remainingStorage: 1024 * 1024 * 1024
+    };
+  }
+}
+
+// ========================================
+// STORAGE QUOTA WITH FILE SIZE
+// ========================================
+
+export async function checkStorageQuotaWithFile(userId: string, fileSize: number): Promise<StorageQuotaInfo> {
   try {
     // Get user's current storage usage
     const { data: usage, error } = await supabaseAdmin
@@ -163,7 +225,11 @@ export async function checkStorageQuota(userId: string, fileSize: number): Promi
   }
 }
 
-async function updateStorageUsage(userId: string, fileSize: number): Promise<void> {
+// ========================================
+// STORAGE USAGE MANAGEMENT
+// ========================================
+
+export async function updateStorageUsage(userId: string, fileSize: number): Promise<void> {
   try {
     const today = new Date().toISOString().split('T')[0];
     
@@ -197,8 +263,7 @@ async function updateStorageUsage(userId: string, fileSize: number): Promise<voi
           date: today,
           storage_used: fileSize,
           file_uploads: 1,
-          message_count: 0,
-          tokens_used: 0
+          message_count: 0
         });
     }
   } catch (error) {
@@ -208,157 +273,52 @@ async function updateStorageUsage(userId: string, fileSize: number): Promise<voi
 }
 
 // ========================================
-// MAIN UPLOAD FUNCTIONS
-// ========================================
-
-export async function uploadFile(
-  file: File, 
-  userId: string, 
-  messageId?: string
-): Promise<UploadResult> {
-  try {
-    // Validate file
-    const validation = validateFile(file);
-    if (!validation.isValid) {
-      return { success: false, error: validation.error };
-    }
-
-    // Check storage quota
-    const quotaCheck = await checkStorageQuota(userId, file.size);
-    if (quotaCheck.isOverQuota) {
-      return { 
-        success: false, 
-        error: `Storage quota exceeded. ${(quotaCheck.remainingStorage / 1024 / 1024).toFixed(2)}MB remaining.`
-      };
-    }
-
-    // Generate safe file name
-    const safeFileName = generateSafeFileName(file.name);
-
-    // Convert to base64 for AI processing
-    const base64Data = await convertFileToBase64(file);
-
-    // Upload to Vercel Blob
-    const { url } = await put(safeFileName, file, {
-      access: 'public',
-    });
-
-    // Save file metadata to database
-    const fileRecord = await createFileAttachment({
-      message_id: messageId,
-      user_id: userId,
-      filename: safeFileName,
-      original_name: file.name,
-      file_path: url,
-      blob_url: url,
-      mime_type: file.type,
-      file_size: file.size,
-      processing_status: 'completed',
-      ai_analysis: {}
-    });
-
-    if (!fileRecord) {
-      return { success: false, error: 'Failed to save file metadata' };
-    }
-
-    // Update storage usage
-    await updateStorageUsage(userId, file.size);
-
-    return {
-      success: true,
-      file: {
-        id: fileRecord.id,
-        name: fileRecord.original_name,
-        url: fileRecord.blob_url || url,
-        mimeType: fileRecord.mime_type,
-        size: fileRecord.file_size,
-        base64: base64Data
-      }
-    };
-
-  } catch (error) {
-    console.error('File upload error:', error);
-    return { 
-      success: false, 
-      error: error instanceof Error ? error.message : 'Unknown upload error'
-    };
-  }
-}
-
-export async function uploadFiles(
-  files: File[], 
-  userId: string, 
-  messageId?: string
-): Promise<{
-  successes: UploadResult[];
-  failures: UploadResult[];
-}> {
-  const successes: UploadResult[] = [];
-  const failures: UploadResult[] = [];
-
-  for (const file of files) {
-    const result = await uploadFile(file, userId, messageId);
-    if (result.success) {
-      successes.push(result);
-    } else {
-      failures.push(result);
-    }
-  }
-
-  return { successes, failures };
-}
-
-// ========================================
-// FILE MANAGEMENT FUNCTIONS
+// FILE MANAGEMENT
 // ========================================
 
 export async function deleteFile(fileId: string, userId: string): Promise<boolean> {
   try {
-    // Get file info from database
+    // Get file record first to check ownership and get file details
     const { data: fileRecord, error: fetchError } = await supabaseAdmin
       .from('file_attachments')
       .select('*')
       .eq('id', fileId)
-      .eq('user_id', userId)
+      .eq('user_id', userId) // Ensure user owns the file
       .single();
 
-    if (fetchError || !fileRecord) {
-      console.error('File not found:', fetchError);
+    if (fetchError) {
+      console.error('Error fetching file for deletion:', fetchError);
       return false;
     }
 
-    // Delete from Vercel Blob
-    if (fileRecord.blob_url) {
-      try {
-        await del(fileRecord.blob_url);
-      } catch (blobError) {
-        console.error('Error deleting from blob storage:', blobError);
-        // Continue with database deletion even if blob deletion fails
-      }
+    if (!fileRecord) {
+      console.error('File not found or access denied');
+      return false;
     }
 
-    // Delete from database
-    const { error: deleteError } = await supabaseAdmin
+    // Delete from database first
+    const { error: dbError } = await supabaseAdmin
       .from('file_attachments')
       .delete()
-      .eq('id', fileId);
+      .eq('id', fileId)
+      .eq('user_id', userId);
 
-    if (deleteError) {
-      console.error('Error deleting file record:', deleteError);
+    if (dbError) {
+      console.error('Error deleting file from database:', dbError);
       return false;
     }
 
-    // Update storage usage
+    // Update storage usage (reduce)
     try {
       const today = new Date().toISOString().split('T')[0];
-      const { data: usage } = await supabaseAdmin
+      const { data: usage, error: usageError } = await supabaseAdmin
         .from('usage_tracking')
         .select('*')
         .eq('user_id', userId)
         .eq('date', today)
         .single();
 
-      if (usage) {
+      if (!usageError && usage) {
         await supabaseAdmin
           .from('usage_tracking')
           .update({
@@ -428,56 +388,114 @@ export async function getUserFiles(userId: string, limit: number = 50): Promise<
 export function formatFileSize(bytes: number): string {
   if (bytes === 0) return '0 Bytes';
   const k = 1024;
-  const sizes = ['Bytes', 'KB', 'MB', 'GB'];
+  const sizes = ['Bytes', 'KB', 'MB', 'GB', 'TB'];
   const i = Math.floor(Math.log(bytes) / Math.log(k));
-  return parseFloat((bytes / Math.pow(k, i)).toFixed(2)) + ' ' + sizes[i];
+  const size = parseFloat((bytes / Math.pow(k, i)).toFixed(1));
+  return `${size} ${sizes[i]}`;
 }
 
-export function getFileCategory(file: File): string {
-  const type = file.type.toLowerCase();
+export function getFileExtension(filename: string): string {
+  return filename.slice((filename.lastIndexOf('.') - 1 >>> 0) + 2);
+}
+
+export function generateSafeFileName(originalName: string): string {
+  const timestamp = Date.now();
+  const randomString = Math.random().toString(36).substring(2, 15);
+  const extension = originalName.split('.').pop() || '';
+  const baseName = originalName.replace(/[^a-zA-Z0-9.-]/g, '_').substring(0, 50);
   
-  if (type.startsWith('image/')) return 'image';
-  if (type.startsWith('audio/')) return 'audio';
-  if (type.startsWith('video/')) return 'video';
-  if (type.includes('pdf')) return 'document';
-  if (type.includes('text/') || type.includes('json') || type.includes('csv')) return 'text';
-  if (type.includes('zip') || type.includes('rar') || type.includes('7z')) return 'archive';
+  return `${timestamp}_${randomString}_${baseName}${extension ? '.' + extension : ''}`;
+}
+
+export function getMimeTypeFromExtension(filename: string): string {
+  const extension = getFileExtension(filename).toLowerCase();
   
-  return 'other';
+  const mimeTypes: Record<string, string> = {
+    // Images
+    'jpg': 'image/jpeg',
+    'jpeg': 'image/jpeg',
+    'png': 'image/png',
+    'gif': 'image/gif',
+    'webp': 'image/webp',
+    'svg': 'image/svg+xml',
+    'bmp': 'image/bmp',
+    
+    // Audio
+    'mp3': 'audio/mpeg',
+    'wav': 'audio/wav',
+    'ogg': 'audio/ogg',
+    'm4a': 'audio/mp4',
+    'aac': 'audio/aac',
+    
+    // Video
+    'mp4': 'video/mp4',
+    'webm': 'video/webm',
+    'mov': 'video/quicktime',
+    'avi': 'video/x-msvideo',
+    'mkv': 'video/mkv',
+    
+    // Documents
+    'pdf': 'application/pdf',
+    'txt': 'text/plain',
+    'csv': 'text/csv',
+    'md': 'text/markdown',
+    'json': 'application/json',
+    'xml': 'application/xml',
+    
+    // Office
+    'docx': 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+    'xlsx': 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+    'pptx': 'application/vnd.openxmlformats-officedocument.presentationml.presentation',
+    'doc': 'application/msword',
+    
+    // Archives
+    'zip': 'application/zip',
+    'rar': 'application/x-rar-compressed',
+    '7z': 'application/x-7z-compressed'
+  };
+  
+  return mimeTypes[extension] || 'application/octet-stream';
 }
 
-export function getFileIcon(mimeType: string): string {
-  if (mimeType.startsWith('image/')) return '🖼️';
-  if (mimeType.startsWith('audio/')) return '🎵';
-  if (mimeType.startsWith('video/')) return '🎬';
-  if (mimeType.includes('pdf')) return '📄';
-  if (mimeType.includes('text/') || mimeType.includes('json')) return '📝';
-  if (mimeType.includes('zip') || mimeType.includes('rar')) return '📦';
-  return '📁';
-}
+// ========================================
+// HEALTH CHECK
+// ========================================
 
-export function isImageFile(mimeType: string): boolean {
-  return mimeType.startsWith('image/');
-}
+export async function getStorageHealth(): Promise<{
+  status: 'healthy' | 'warning' | 'error';
+  details: any;
+}> {
+  try {
+    // Check database connectivity
+    const { data, error } = await supabaseAdmin
+      .from('file_attachments')
+      .select('count(*)')
+      .limit(1);
 
-export function isVideoFile(mimeType: string): boolean {
-  return mimeType.startsWith('video/');
-}
+    if (error) {
+      return {
+        status: 'error',
+        details: {
+          error: 'Database connectivity issue',
+          message: error.message
+        }
+      };
+    }
 
-export function isAudioFile(mimeType: string): boolean {
-  return mimeType.startsWith('audio/');
-}
-
-export function isDocumentFile(mimeType: string): boolean {
-  const documentTypes = [
-    'application/pdf',
-    'text/plain',
-    'text/csv',
-    'text/markdown',
-    'application/json',
-    'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
-    'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
-    'application/vnd.openxmlformats-officedocument.presentationml.presentation'
-  ];
-  return documentTypes.includes(mimeType);
+    return {
+      status: 'healthy',
+      details: {
+        timestamp: new Date().toISOString(),
+        dbConnected: true
+      }
+    };
+  } catch (error) {
+    return {
+      status: 'error',
+      details: {
+        error: 'Storage health check failed',
+        message: error instanceof Error ? error.message : 'Unknown error'
+      }
+    };
+  }
 }
