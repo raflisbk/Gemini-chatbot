@@ -1,4 +1,4 @@
-// src/context/AuthContext.tsx - COMPLETE FIXED VERSION
+// src/context/AuthContext.tsx - COMPLETE INTEGRATED VERSION
 'use client';
 
 import React, { createContext, useContext, useState, useEffect, useCallback } from 'react';
@@ -14,7 +14,7 @@ interface User {
   role: 'admin' | 'user';
   isActive: boolean;
   avatarUrl?: string;
-  photoURL?: string; // Added for compatibility
+  photoURL?: string;
   messageCount?: number;
   lastLogin?: string;
   settings?: any;
@@ -54,8 +54,8 @@ interface ModelSettings {
   temperature: number;
   maxTokens: number;
   systemPrompt: string;
-  topP: number; // Added for SettingsDialog
-  topK: number; // Added for SettingsDialog
+  topP: number;
+  topK: number;
 }
 
 interface ChatSettings {
@@ -63,14 +63,46 @@ interface ChatSettings {
   soundEnabled: boolean;
   darkMode: boolean;
   language: string;
+  showTimestamps: boolean;
+  compactMode: boolean;
+  enableSounds: boolean;
+  autoScroll: boolean;
+  messageLimit: number;
+  typingIndicator: boolean;
+  readReceipts: boolean;
 }
 
 interface AppearanceSettings {
-  theme: string;
-  fontSize: string;
+  theme: 'light' | 'dark' | 'system';
+  fontSize: number;
+  fontFamily: string;
   avatarStyle: string;
-  sidebarPosition: 'left' | 'right'; // Added for SettingsDialog
-  accentColor: string; // Added for SettingsDialog
+  sidebarPosition: 'left' | 'right';
+  accentColor: string;
+  primaryColor: string;
+  borderRadius: number;
+  compactUI: boolean;
+  animations: boolean;
+  transparency: number;
+}
+
+interface VoiceSettings {
+  enabled: boolean;
+  autoSpeak: boolean;
+  voice: string;
+  rate: number;
+  pitch: number;
+  volume: number;
+  recognition: boolean;
+  language: string;
+}
+
+interface PrivacySettings {
+  saveHistory: boolean;
+  allowAnalytics: boolean;
+  shareUsageData: boolean;
+  encryptMessages: boolean;
+  autoDeleteAfter: number;
 }
 
 interface RegisterData {
@@ -90,20 +122,31 @@ interface AuthContextType {
   isLoading: boolean;
   error: string | null;
   
-  // Usage tracking
+  // Quota & Usage
   usage: UsageStats;
   updateUsage: (type: 'message' | 'file') => void;
   refreshUsage: () => void;
+  canSendMessage: () => boolean;
+  getRemainingMessages: () => number;
+  getQuotaLimit: () => number;
+  quotaUsed: number;
+  quotaLimit: number;
   
   // Settings
   modelSettings: ModelSettings;
   chatSettings: ChatSettings;
   appearanceSettings: AppearanceSettings;
+  voiceSettings: VoiceSettings;
+  privacySettings: PrivacySettings;
+  
+  // Settings update functions
   updateModelSettings: (settings: Partial<ModelSettings>) => void;
   updateChatSettings: (settings: Partial<ChatSettings>) => void;
   updateAppearanceSettings: (settings: Partial<AppearanceSettings>) => void;
+  updateVoiceSettings: (settings: Partial<VoiceSettings>) => void;
+  updatePrivacySettings: (settings: Partial<PrivacySettings>) => void;
   
-  // Settings management functions - Added for SettingsDialog
+  // Settings management
   resetSettingsToDefaults: () => void;
   exportSettings: () => string;
   importSettings: (settingsJson: string) => boolean;
@@ -112,12 +155,18 @@ interface AuthContextType {
   login: (email: string, password: string) => Promise<boolean>;
   logout: () => void;
   register: (userData: RegisterData) => Promise<{ success: boolean; error?: string }>;
-  
-  // Guest actions
   initializeGuest: () => Promise<void>;
-  canSendMessage: () => boolean;
-  getRemainingMessages: () => number;
 }
+
+// ========================================
+// QUOTA CONSTANTS
+// ========================================
+
+const QUOTA_LIMITS = {
+  guest: 5,
+  user: 25,
+  admin: Infinity
+};
 
 // ========================================
 // DEFAULT VALUES
@@ -154,14 +203,46 @@ const defaultChatSettings: ChatSettings = {
   soundEnabled: false,
   darkMode: false,
   language: 'id',
+  showTimestamps: true,
+  compactMode: false,
+  enableSounds: false,
+  autoScroll: true,
+  messageLimit: 100,
+  typingIndicator: true,
+  readReceipts: true,
 };
 
 const defaultAppearanceSettings: AppearanceSettings = {
-  theme: 'light',
-  fontSize: 'medium',
+  theme: 'system',
+  fontSize: 14,
+  fontFamily: 'Inter',
   avatarStyle: 'circle',
   sidebarPosition: 'left',
   accentColor: '#3b82f6',
+  primaryColor: '#10b981',
+  borderRadius: 8,
+  compactUI: false,
+  animations: true,
+  transparency: 95,
+};
+
+const defaultVoiceSettings: VoiceSettings = {
+  enabled: false,
+  autoSpeak: false,
+  voice: 'default',
+  rate: 1.0,
+  pitch: 1.0,
+  volume: 0.8,
+  recognition: false,
+  language: 'id-ID'
+};
+
+const defaultPrivacySettings: PrivacySettings = {
+  saveHistory: true,
+  allowAnalytics: false,
+  shareUsageData: false,
+  encryptMessages: true,
+  autoDeleteAfter: 30
 };
 
 // ========================================
@@ -186,11 +267,22 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
   // Core state
   const [authState, setAuthState] = useState<AuthState>(defaultAuthState);
   const [usage, setUsage] = useState<UsageStats>(defaultUsageStats);
+  const [quotaUsed, setQuotaUsed] = useState(0);
   
   // Settings state
   const [modelSettings, setModelSettings] = useState<ModelSettings>(defaultModelSettings);
   const [chatSettings, setChatSettings] = useState<ChatSettings>(defaultChatSettings);
   const [appearanceSettings, setAppearanceSettings] = useState<AppearanceSettings>(defaultAppearanceSettings);
+  const [voiceSettings, setVoiceSettings] = useState<VoiceSettings>(defaultVoiceSettings);
+  const [privacySettings, setPrivacySettings] = useState<PrivacySettings>(defaultPrivacySettings);
+
+  // ========================================
+  // DERIVED VALUES
+  // ========================================
+
+  const userRole = authState.user?.role || 'guest';
+  const isAdmin = authState.user?.role === 'admin';
+  const quotaLimit = QUOTA_LIMITS[userRole as keyof typeof QUOTA_LIMITS];
 
   // ========================================
   // INITIALIZATION
@@ -201,18 +293,22 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     loadSettings();
   }, []);
 
+  useEffect(() => {
+    loadQuotaUsage();
+  }, [authState.user, authState.isGuest]);
+
   const initializeAuth = async () => {
     try {
       setAuthState(prev => ({ ...prev, isLoading: true }));
       
       // Check for existing auth token
-      const token = localStorage.getItem('auth-token');
+      const token = localStorage.getItem('auth_token');
       if (token) {
         const isValid = await verifyToken(token);
         if (isValid) {
           return; // User is authenticated
         } else {
-          localStorage.removeItem('auth-token');
+          localStorage.removeItem('auth_token');
         }
       }
       
@@ -235,7 +331,6 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       if (response.ok) {
         const data = await response.json();
         
-        // Ensure user object has photoURL for compatibility
         const user = {
           ...data.user,
           photoURL: data.user.avatarUrl || data.user.avatar_url || null
@@ -257,6 +352,48 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       return false;
     }
   };
+
+  // ========================================
+  // QUOTA MANAGEMENT
+  // ========================================
+
+  const loadQuotaUsage = useCallback(() => {
+    try {
+      if (userRole === 'guest') {
+        const guestUsage = localStorage.getItem('guest-quota-usage');
+        const resetDate = localStorage.getItem('guest-quota-reset');
+        const today = new Date().toDateString();
+        
+        // Reset daily quota for guests
+        if (resetDate !== today) {
+          localStorage.setItem('guest-quota-usage', '0');
+          localStorage.setItem('guest-quota-reset', today);
+          setQuotaUsed(0);
+        } else {
+          setQuotaUsed(guestUsage ? parseInt(guestUsage) : 0);
+        }
+      } else if (authState.user) {
+        // For authenticated users, load from database or localStorage
+        setQuotaUsed(authState.user.messageCount || 0);
+      }
+    } catch (error) {
+      console.error('Error loading quota usage:', error);
+    }
+  }, [userRole, authState.user]);
+
+  const canSendMessage = useCallback((): boolean => {
+    if (userRole === 'admin') return true;
+    return quotaUsed < quotaLimit;
+  }, [userRole, quotaUsed, quotaLimit]);
+
+  const getRemainingMessages = useCallback((): number => {
+    if (userRole === 'admin') return -1; // Unlimited
+    return Math.max(0, quotaLimit - quotaUsed);
+  }, [userRole, quotaUsed, quotaLimit]);
+
+  const getQuotaLimit = useCallback((): number => {
+    return quotaLimit;
+  }, [quotaLimit]);
 
   // ========================================
   // GUEST SESSION MANAGEMENT
@@ -304,22 +441,6 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     }
   };
 
-  const canSendMessage = useCallback((): boolean => {
-    if (authState.isAuthenticated) return true;
-    if (authState.isGuest && authState.guestSession) {
-      return authState.guestSession.messageCount < authState.guestSession.maxMessages;
-    }
-    return false;
-  }, [authState]);
-
-  const getRemainingMessages = useCallback((): number => {
-    if (authState.isAuthenticated) return -1; // Unlimited
-    if (authState.isGuest && authState.guestSession) {
-      return authState.guestSession.maxMessages - authState.guestSession.messageCount;
-    }
-    return 0;
-  }, [authState]);
-
   // ========================================
   // AUTHENTICATION ACTIONS
   // ========================================
@@ -337,13 +458,15 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       const data = await response.json();
 
       if (response.ok && data.success) {
-        localStorage.setItem('auth-token', data.token);
-        localStorage.removeItem('guest-token'); // Clear guest session
+        localStorage.setItem('auth_token', data.token);
+        localStorage.removeItem('guest-token');
+        localStorage.removeItem('guest-quota-usage');
+        localStorage.removeItem('guest-quota-reset');
         
-        // Ensure user object has photoURL for compatibility
         const user = {
           ...data.user,
-          photoURL: data.user.avatarUrl || data.user.avatar_url || null
+          photoURL: data.user.avatarUrl || data.user.avatar_url || null,
+          role: data.user.role || 'user' // Ensure role is set
         };
         
         setAuthState(prev => ({
@@ -390,13 +513,13 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       const data = await response.json();
 
       if (response.ok && data.success) {
-        localStorage.setItem('auth-token', data.token);
+        localStorage.setItem('auth_token', data.token);
         localStorage.removeItem('guest-token');
         
-        // Ensure user object has photoURL for compatibility
         const user = {
           ...data.user,
-          photoURL: data.user.avatarUrl || data.user.avatar_url || null
+          photoURL: data.user.avatarUrl || data.user.avatar_url || null,
+          role: data.user.role || 'user'
         };
         
         setAuthState(prev => ({
@@ -432,7 +555,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
   }, []);
 
   const logout = useCallback(() => {
-    localStorage.removeItem('auth-token');
+    localStorage.removeItem('auth_token');
     localStorage.removeItem('guest-token');
     
     setAuthState(prev => ({
@@ -444,7 +567,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       error: null,
     }));
     
-    // Reinitialize as guest
+    setQuotaUsed(0);
     initializeGuest();
   }, []);
 
@@ -454,7 +577,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
 
   const refreshUsage = useCallback(async () => {
     try {
-      const token = localStorage.getItem('auth-token');
+      const token = localStorage.getItem('auth_token');
       if (!token) return;
 
       const response = await fetch('/api/usage', {
@@ -464,6 +587,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       if (response.ok) {
         const data = await response.json();
         setUsage(data.usage);
+        setQuotaUsed(data.usage.messageCount || 0);
       }
     } catch (error) {
       console.error('Usage refresh error:', error);
@@ -477,16 +601,26 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
         messageCount: type === 'message' ? prev.messageCount + 1 : prev.messageCount,
         fileUploads: type === 'file' ? prev.fileUploads + 1 : prev.fileUploads,
       }));
-    } else if (authState.isGuest && authState.guestSession) {
-      setAuthState(prev => ({
-        ...prev,
-        guestSession: prev.guestSession ? {
-          ...prev.guestSession,
-          messageCount: prev.guestSession.messageCount + 1,
-        } : null,
-      }));
+      
+      if (type === 'message') {
+        setQuotaUsed(prev => prev + 1);
+      }
+    } else if (authState.isGuest) {
+      const newUsage = quotaUsed + 1;
+      setQuotaUsed(newUsage);
+      localStorage.setItem('guest-quota-usage', newUsage.toString());
+      
+      if (authState.guestSession) {
+        setAuthState(prev => ({
+          ...prev,
+          guestSession: prev.guestSession ? {
+            ...prev.guestSession,
+            messageCount: prev.guestSession.messageCount + 1,
+          } : null,
+        }));
+      }
     }
-  }, [authState]);
+  }, [authState, quotaUsed]);
 
   // ========================================
   // SETTINGS MANAGEMENT
@@ -497,6 +631,8 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       const savedModelSettings = localStorage.getItem('ai-chatbot-model-settings');
       const savedChatSettings = localStorage.getItem('ai-chatbot-chat-settings');
       const savedAppearanceSettings = localStorage.getItem('ai-chatbot-appearance-settings');
+      const savedVoiceSettings = localStorage.getItem('ai-chatbot-voice-settings');
+      const savedPrivacySettings = localStorage.getItem('ai-chatbot-privacy-settings');
 
       if (savedModelSettings) {
         setModelSettings({ ...defaultModelSettings, ...JSON.parse(savedModelSettings) });
@@ -506,6 +642,12 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       }
       if (savedAppearanceSettings) {
         setAppearanceSettings({ ...defaultAppearanceSettings, ...JSON.parse(savedAppearanceSettings) });
+      }
+      if (savedVoiceSettings) {
+        setVoiceSettings({ ...defaultVoiceSettings, ...JSON.parse(savedVoiceSettings) });
+      }
+      if (savedPrivacySettings) {
+        setPrivacySettings({ ...defaultPrivacySettings, ...JSON.parse(savedPrivacySettings) });
       }
     } catch (error) {
       console.error('Failed to load settings:', error);
@@ -536,18 +678,38 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     });
   }, []);
 
+  const updateVoiceSettings = useCallback((settings: Partial<VoiceSettings>) => {
+    setVoiceSettings(prev => {
+      const newSettings = { ...prev, ...settings };
+      localStorage.setItem('ai-chatbot-voice-settings', JSON.stringify(newSettings));
+      return newSettings;
+    });
+  }, []);
+
+  const updatePrivacySettings = useCallback((settings: Partial<PrivacySettings>) => {
+    setPrivacySettings(prev => {
+      const newSettings = { ...prev, ...settings };
+      localStorage.setItem('ai-chatbot-privacy-settings', JSON.stringify(newSettings));
+      return newSettings;
+    });
+  }, []);
+
   // ========================================
-  // SETTINGS MANAGEMENT FUNCTIONS (Added for SettingsDialog)
+  // SETTINGS MANAGEMENT FUNCTIONS
   // ========================================
 
   const resetSettingsToDefaults = useCallback(() => {
     setModelSettings(defaultModelSettings);
     setChatSettings(defaultChatSettings);
     setAppearanceSettings(defaultAppearanceSettings);
+    setVoiceSettings(defaultVoiceSettings);
+    setPrivacySettings(defaultPrivacySettings);
     
     localStorage.setItem('ai-chatbot-model-settings', JSON.stringify(defaultModelSettings));
     localStorage.setItem('ai-chatbot-chat-settings', JSON.stringify(defaultChatSettings));
     localStorage.setItem('ai-chatbot-appearance-settings', JSON.stringify(defaultAppearanceSettings));
+    localStorage.setItem('ai-chatbot-voice-settings', JSON.stringify(defaultVoiceSettings));
+    localStorage.setItem('ai-chatbot-privacy-settings', JSON.stringify(defaultPrivacySettings));
   }, []);
 
   const exportSettings = useCallback((): string => {
@@ -555,11 +717,13 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       model: modelSettings,
       chat: chatSettings,
       appearance: appearanceSettings,
+      voice: voiceSettings,
+      privacy: privacySettings,
       exportedAt: new Date().toISOString(),
-      version: '2.0'
+      version: '2.1'
     };
     return JSON.stringify(settings, null, 2);
-  }, [modelSettings, chatSettings, appearanceSettings]);
+  }, [modelSettings, chatSettings, appearanceSettings, voiceSettings, privacySettings]);
 
   const importSettings = useCallback((settingsJson: string): boolean => {
     try {
@@ -582,6 +746,18 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
         setAppearanceSettings(newAppearanceSettings);
         localStorage.setItem('ai-chatbot-appearance-settings', JSON.stringify(newAppearanceSettings));
       }
+
+      if (settings.voice) {
+        const newVoiceSettings = { ...defaultVoiceSettings, ...settings.voice };
+        setVoiceSettings(newVoiceSettings);
+        localStorage.setItem('ai-chatbot-voice-settings', JSON.stringify(newVoiceSettings));
+      }
+
+      if (settings.privacy) {
+        const newPrivacySettings = { ...defaultPrivacySettings, ...settings.privacy };
+        setPrivacySettings(newPrivacySettings);
+        localStorage.setItem('ai-chatbot-privacy-settings', JSON.stringify(newPrivacySettings));
+      }
       
       return true;
     } catch (error) {
@@ -589,12 +765,6 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       return false;
     }
   }, []);
-
-  // ========================================
-  // DERIVED VALUES
-  // ========================================
-
-  const isAdmin = authState.user?.role === 'admin';
 
   // ========================================
   // CONTEXT VALUE
@@ -610,20 +780,31 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     isLoading: authState.isLoading,
     error: authState.error,
     
-    // Usage tracking
+    // Quota & Usage
     usage,
     updateUsage,
     refreshUsage,
+    canSendMessage,
+    getRemainingMessages,
+    getQuotaLimit,
+    quotaUsed,
+    quotaLimit,
     
     // Settings
     modelSettings,
     chatSettings,
     appearanceSettings,
+    voiceSettings,
+    privacySettings,
+    
+    // Settings update functions
     updateModelSettings,
     updateChatSettings,
     updateAppearanceSettings,
+    updateVoiceSettings,
+    updatePrivacySettings,
     
-    // Settings management functions
+    // Settings management
     resetSettingsToDefaults,
     exportSettings,
     importSettings,
@@ -632,11 +813,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     login,
     logout,
     register,
-    
-    // Guest actions
     initializeGuest,
-    canSendMessage,
-    getRemainingMessages,
   };
 
   return (

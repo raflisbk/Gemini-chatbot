@@ -1,27 +1,38 @@
+// src/app/page.tsx - Fixed import error
+
 'use client';
 
 import { useAuth } from '@/context/AuthContext';
-import { ChatBot } from '@/components/ChatBot';
-import { motion } from 'framer-motion';
+import { useEffect } from 'react';
+import { useRouter } from 'next/navigation';
 
-export default function Home() {
-  const { isLoading } = useAuth();
+// FIXED: Use default import instead of named import
+import ChatBot from '@/components/ChatBot';
 
+export default function HomePage() {
+  const { isAuthenticated, isLoading } = useAuth();
+  const router = useRouter();
+
+  // Optional: Redirect logic if needed
+  useEffect(() => {
+    // Add any redirect logic here if needed
+    // For now, we'll show the ChatBot for everyone
+  }, [isAuthenticated, router]);
+
+  // Show loading state while auth is being checked
   if (isLoading) {
     return (
-      <div className="min-h-screen flex items-center justify-center">
-        <motion.div
-          animate={{ rotate: 360 }}
-          transition={{ duration: 2, repeat: Infinity, ease: "linear" }}
-          className="w-8 h-8 border-2 border-primary border-t-transparent rounded-full"
-        />
+      <div className="flex items-center justify-center min-h-screen">
+        <div className="text-center">
+          <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-primary mx-auto mb-4"></div>
+          <p className="text-muted-foreground">Loading...</p>
+        </div>
       </div>
     );
   }
 
-  // Always render ChatBot - no authentication required for basic access
   return (
-    <main className="min-h-screen">
+    <main className="h-screen w-full">
       <ChatBot />
     </main>
   );
