@@ -1,4 +1,4 @@
-// src/app/api/auth/login/route.ts - COMPLETE INTEGRATED VERSION
+// src/app/api/auth/login/route.ts - COMPLETE FIXED VERSION
 import { NextRequest, NextResponse } from 'next/server';
 import { z } from 'zod';
 import bcryptjs from 'bcryptjs';
@@ -15,19 +15,33 @@ const loginSchema = z.object({
 });
 
 // ========================================
-// INTERFACES
+// INTERFACES - FIXED
 // ========================================
+
+interface DatabaseUser {
+  id: string;
+  email: string;
+  name: string;
+  role: string; // Fixed: Database stores as string
+  password_hash: string;
+  is_active: boolean;
+  avatar_url?: string | null;
+  message_count?: number;
+  last_login?: string | null;
+  settings?: any;
+  created_at: string;
+  updated_at: string;
+}
 
 interface User {
   id: string;
   email: string;
   name: string;
-  role: 'admin' | 'user';
-  password_hash: string;
-  is_active: boolean;
-  avatar_url?: string;
-  message_count?: number;
-  last_login?: string;
+  role: 'admin' | 'user'; // Type-safe interface
+  isActive: boolean;
+  avatarUrl?: string;
+  messageCount: number;
+  lastLogin: string;
   settings?: any;
   created_at: string;
   updated_at: string;
@@ -35,28 +49,30 @@ interface User {
 
 interface LoginResponse {
   success: boolean;
-  user?: {
-    id: string;
-    email: string;
-    name: string;
-    role: 'admin' | 'user';
-    isActive: boolean;
-    avatarUrl?: string;
-    messageCount: number;
-    lastLogin: string;
-    settings?: any;
-    created_at: string;
-    updated_at: string;
-  };
+  user?: User;
   token?: string;
   error?: string;
 }
 
+interface SecurityEventInsert {
+  event_type: string;
+  severity?: string;
+  ip_address?: string | null;
+  user_id?: string | null;
+  session_id?: string | null;
+  user_agent?: string | null;
+  request_path?: string | null;
+  request_method?: string | null;
+  details?: any;
+  resolved?: boolean;
+  created_at?: string;
+}
+
 // ========================================
-// HELPER FUNCTIONS
+// HELPER FUNCTIONS - FIXED
 // ========================================
 
-async function getUserByEmail(email: string): Promise<User | null> {
+async function getUserByEmail(email: string): Promise<DatabaseUser | null> {
   try {
     const { data: user, error } = await supabaseAdmin
       .from('users')
@@ -66,6 +82,10 @@ async function getUserByEmail(email: string): Promise<User | null> {
       .single();
 
     if (error) {
+      if (error.code === 'PGRST116') {
+        // No rows found
+        return null;
+      }
       console.error('Database error:', error);
       return null;
     }
@@ -114,14 +134,6 @@ async function updateUserLoginInfo(userId: string, ipAddress?: string, userAgent
       updated_at: new Date().toISOString(),
     };
 
-    // Only update IP and user agent if provided
-    if (ipAddress) {
-      updateData.last_ip = ipAddress;
-    }
-    if (userAgent) {
-      updateData.last_user_agent = userAgent;
-    }
-
     const { error } = await supabaseAdmin
       .from('users')
       .update(updateData)
@@ -135,30 +147,47 @@ async function updateUserLoginInfo(userId: string, ipAddress?: string, userAgent
   }
 }
 
-async function logLoginAttempt(
+// ========================================
+// SECURITY EVENT LOGGING - FIXED
+// ========================================
+
+async function logSecurityEvent(
+  eventType: string,
   email: string, 
   success: boolean, 
   ipAddress?: string, 
   userAgent?: string,
-  errorReason?: string
+  errorReason?: string,
+  userId?: string
 ): Promise<void> {
   try {
-    const { error } = await supabaseAdmin
-      .from('login_attempts')
-      .insert({
+    const securityEvent: SecurityEventInsert = {
+      event_type: eventType,
+      severity: success ? 'info' : 'warning',
+      ip_address: ipAddress || null,
+      user_id: userId || null,
+      user_agent: userAgent || null,
+      request_path: '/api/auth/login',
+      request_method: 'POST',
+      details: {
         email: email.toLowerCase(),
         success,
-        ip_address: ipAddress,
-        user_agent: userAgent,
-        error_reason: errorReason,
-        created_at: new Date().toISOString(),
-      });
+        error_reason: errorReason || null,
+        timestamp: new Date().toISOString()
+      },
+      resolved: success,
+      created_at: new Date().toISOString(),
+    };
+
+    const { error } = await supabaseAdmin
+      .from('security_events')
+      .insert(securityEvent);
 
     if (error) {
-      console.error('Error logging login attempt:', error);
+      console.error('Error logging security event:', error);
     }
   } catch (error) {
-    console.error('Error in logLoginAttempt:', error);
+    console.error('Error in logSecurityEvent:', error);
     // Don't fail the login if logging fails
   }
 }
@@ -167,18 +196,19 @@ async function checkRateLimit(email: string, ipAddress?: string): Promise<boolea
   try {
     const fiveMinutesAgo = new Date(Date.now() - 5 * 60 * 1000).toISOString();
     
-    // Check failed attempts in last 5 minutes
+    // Check failed login attempts in last 5 minutes using security_events
     let query = supabaseAdmin
-      .from('login_attempts')
+      .from('security_events')
       .select('id')
-      .eq('success', false)
-      .gte('created_at', fiveMinutesAgo);
+      .eq('event_type', 'login_attempt')
+      .gte('created_at', fiveMinutesAgo)
+      .eq('details->success', false);
 
     // Check both email and IP
     if (ipAddress) {
-      query = query.or(`email.eq.${email.toLowerCase()},ip_address.eq.${ipAddress}`);
+      query = query.or(`details->email.eq.${email.toLowerCase()},ip_address.eq.${ipAddress}`);
     } else {
-      query = query.eq('email', email.toLowerCase());
+      query = query.eq('details->email', email.toLowerCase());
     }
 
     const { data: attempts, error } = await query;
@@ -197,7 +227,7 @@ async function checkRateLimit(email: string, ipAddress?: string): Promise<boolea
 }
 
 // ========================================
-// MAIN LOGIN FUNCTION
+// MAIN LOGIN FUNCTION - FIXED
 // ========================================
 
 async function loginUser(
@@ -210,7 +240,7 @@ async function loginUser(
     // Check rate limiting
     const isAllowed = await checkRateLimit(email, ipAddress);
     if (!isAllowed) {
-      await logLoginAttempt(email, false, ipAddress, userAgent, 'Rate limited');
+      await logSecurityEvent('login_attempt', email, false, ipAddress, userAgent, 'Rate limited');
       return {
         success: false,
         error: 'Too many failed login attempts. Please try again in 5 minutes.'
@@ -218,9 +248,9 @@ async function loginUser(
     }
 
     // Get user from database
-    const user = await getUserByEmail(email);
-    if (!user) {
-      await logLoginAttempt(email, false, ipAddress, userAgent, 'User not found');
+    const dbUser = await getUserByEmail(email);
+    if (!dbUser) {
+      await logSecurityEvent('login_attempt', email, false, ipAddress, userAgent, 'User not found');
       return {
         success: false,
         error: 'Invalid email or password'
@@ -228,9 +258,9 @@ async function loginUser(
     }
 
     // Verify password
-    const isPasswordValid = await verifyPassword(password, user.password_hash);
+    const isPasswordValid = await verifyPassword(password, dbUser.password_hash);
     if (!isPasswordValid) {
-      await logLoginAttempt(email, false, ipAddress, userAgent, 'Invalid password');
+      await logSecurityEvent('login_attempt', email, false, ipAddress, userAgent, 'Invalid password', dbUser.id);
       return {
         success: false,
         error: 'Invalid email or password'
@@ -238,44 +268,50 @@ async function loginUser(
     }
 
     // Check if user is active
-    if (!user.is_active) {
-      await logLoginAttempt(email, false, ipAddress, userAgent, 'Account inactive');
+    if (!dbUser.is_active) {
+      await logSecurityEvent('login_attempt', email, false, ipAddress, userAgent, 'Account inactive', dbUser.id);
       return {
         success: false,
         error: 'Your account has been deactivated. Please contact an administrator.'
       };
     }
 
+    // Validate role and ensure it's either 'admin' or 'user'
+    const validRole = (dbUser.role === 'admin' || dbUser.role === 'user') ? dbUser.role : 'user';
+
     // Generate JWT token
-    const token = generateToken(user.id, user.role);
+    const token = generateToken(dbUser.id, validRole);
 
     // Update user login information
-    await updateUserLoginInfo(user.id, ipAddress, userAgent);
+    await updateUserLoginInfo(dbUser.id, ipAddress, userAgent);
 
     // Log successful login
-    await logLoginAttempt(email, true, ipAddress, userAgent);
+    await logSecurityEvent('login_success', email, true, ipAddress, userAgent, undefined, dbUser.id);
+
+    // Convert database user to safe user interface - FIXED TYPE CONVERSION
+    const user: User = {
+      id: dbUser.id,
+      email: dbUser.email,
+      name: dbUser.name,
+      role: validRole as 'admin' | 'user', // Type-safe conversion
+      isActive: dbUser.is_active,
+      avatarUrl: dbUser.avatar_url || undefined,
+      messageCount: dbUser.message_count || 0,
+      lastLogin: new Date().toISOString(),
+      settings: dbUser.settings,
+      created_at: dbUser.created_at,
+      updated_at: dbUser.updated_at,
+    };
 
     // Return success response
     return {
       success: true,
-      user: {
-        id: user.id,
-        email: user.email,
-        name: user.name,
-        role: user.role,
-        isActive: user.is_active,
-        avatarUrl: user.avatar_url,
-        messageCount: user.message_count || 0,
-        lastLogin: new Date().toISOString(),
-        settings: user.settings,
-        created_at: user.created_at,
-        updated_at: user.updated_at,
-      },
+      user,
       token,
     };
   } catch (error) {
     console.error('Login function error:', error);
-    await logLoginAttempt(email, false, ipAddress, userAgent, 'Server error');
+    await logSecurityEvent('login_error', email, false, ipAddress, userAgent, 'Server error');
     return {
       success: false,
       error: 'An unexpected error occurred. Please try again.'
@@ -284,7 +320,7 @@ async function loginUser(
 }
 
 // ========================================
-// API ROUTE HANDLER
+// API ROUTE HANDLER - ENHANCED
 // ========================================
 
 export async function POST(request: NextRequest): Promise<NextResponse<LoginResponse>> {

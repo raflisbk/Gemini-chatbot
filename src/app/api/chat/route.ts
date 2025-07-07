@@ -125,7 +125,7 @@ export async function POST(request: NextRequest): Promise<NextResponse<ChatRespo
 
     // Configure AI model
     const finalSettings = {
-      model: settings.model || 'gemini-1.5-flash',
+      model: settings.model || 'gemini-2.5-flash',
       temperature: settings.temperature ?? 0.7,
       maxTokens: settings.maxTokens || 4096
     };

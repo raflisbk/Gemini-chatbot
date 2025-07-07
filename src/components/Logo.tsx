@@ -73,47 +73,32 @@ export function Logo({
           } : undefined}
         />
         
-        {/* Input Layer */}
-        <circle cx="6" cy="8" r="1.5" fill="currentColor" className="opacity-75" />
-        <circle cx="6" cy="12" r="1.5" fill="currentColor" className="opacity-75" />
-        <circle cx="6" cy="16" r="1.5" fill="currentColor" className="opacity-75" />
-        
-        {/* Output Layer */}
-        <circle cx="18" cy="8" r="1.5" fill="currentColor" className="opacity-75" />
-        <circle cx="18" cy="12" r="1.5" fill="currentColor" className="opacity-75" />
-        <circle cx="18" cy="16" r="1.5" fill="currentColor" className="opacity-75" />
-        
-        {/* Connections with animation */}
-        <g stroke="currentColor" strokeWidth="0.5" className="opacity-60">
+        {/* Connection Lines with Animation */}
+        <g stroke="currentColor" strokeWidth="1" className="opacity-70">
           <motion.line 
-            x1="7.5" y1="8" x2="10" y2="12"
+            x1="12" y1="12" x2="6" y2="6"
             animate={animated ? { opacity: [0.3, 0.7, 0.3] } : undefined}
             transition={animated ? { duration: 3, repeat: Infinity, delay: 0 } : undefined}
           />
           <motion.line 
-            x1="7.5" y1="12" x2="10" y2="12"
+            x1="12" y1="12" x2="18" y2="6"
             animate={animated ? { opacity: [0.3, 0.7, 0.3] } : undefined}
             transition={animated ? { duration: 3, repeat: Infinity, delay: 0.5 } : undefined}
           />
           <motion.line 
-            x1="7.5" y1="16" x2="10" y2="12"
+            x1="12" y1="12" x2="6" y2="18"
             animate={animated ? { opacity: [0.3, 0.7, 0.3] } : undefined}
             transition={animated ? { duration: 3, repeat: Infinity, delay: 1 } : undefined}
           />
           <motion.line 
-            x1="14" y1="12" x2="16.5" y2="8"
+            x1="12" y1="12" x2="18" y2="18"
             animate={animated ? { opacity: [0.3, 0.7, 0.3] } : undefined}
             transition={animated ? { duration: 3, repeat: Infinity, delay: 1.5 } : undefined}
           />
           <motion.line 
-            x1="14" y1="12" x2="16.5" y2="12"
+            x1="12" y1="12" x2="16.5" y2="12"
             animate={animated ? { opacity: [0.3, 0.7, 0.3] } : undefined}
             transition={animated ? { duration: 3, repeat: Infinity, delay: 2 } : undefined}
-          />
-          <motion.line 
-            x1="14" y1="12" x2="16.5" y2="16"
-            animate={animated ? { opacity: [0.3, 0.7, 0.3] } : undefined}
-            transition={animated ? { duration: 3, repeat: Infinity, delay: 2.5 } : undefined}
           />
         </g>
         
@@ -150,10 +135,7 @@ export function Logo({
       className={cn('font-bold tracking-tight', textClassName)}
     >
       <span className="bg-gradient-to-r from-emerald-600 via-teal-600 to-blue-600 bg-clip-text text-transparent">
-        AI
-      </span>
-      <span className="text-foreground ml-1">
-        Chatbot
+        AI Chatbot
       </span>
     </motion.div>
   );

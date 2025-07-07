@@ -44,7 +44,7 @@ import { ScrollArea } from './ui/scroll-area';
 import { Alert, AlertDescription } from './ui/alert';
 import { Badge } from './ui/badge';
 
-// Custom Components
+// Custom Components - UPDATED IMPORTS
 import { ChatMessage } from './ChatMessage';
 import { FileUpload } from './FileUpload';
 import { LoadingDots } from './LoadingDots';
@@ -52,6 +52,7 @@ import { Logo } from './Logo';
 import { ThemeToggle } from './ThemeToggle';
 import { SettingsDialog } from './SettingsDialog';
 import { LoginDialog } from './LoginDialog';
+import { EnhancedNavbar } from './EnhancedNavbar';
 
 // Context and Utilities
 import { useAuth } from '@/context/AuthContext';
@@ -107,13 +108,6 @@ interface ChatSession {
   messages?: Message[];
 }
 
-// QUOTA LIMITS
-const QUOTA_LIMITS = {
-  guest: 5,
-  user: 25,
-  admin: Infinity
-};
-
 // Simple ChatHistory component
 const ChatHistory = React.memo(({ 
   sessions, 
@@ -139,61 +133,25 @@ const ChatHistory = React.memo(({
       <ScrollArea className="flex-1">
         <div className="p-2 space-y-2">
           {filteredSessions.length === 0 ? (
-            <div className="text-center py-8">
-              <MessageSquare className="w-8 h-8 mx-auto mb-3 text-muted-foreground/50" />
-              <p className="text-sm text-muted-foreground">
-                {searchQuery ? 'No matching conversations' : 'No conversations yet'}
-              </p>
-              {!searchQuery && (
-                <Button
-                  variant="ghost"
-                  size="sm"
-                  onClick={onNewSession}
-                  className="mt-2"
-                >
-                  Start your first chat
-                </Button>
-              )}
+            <div className="text-center p-4 text-muted-foreground text-sm">
+              No conversations found
             </div>
           ) : (
             filteredSessions.map((session) => (
               <div
                 key={session.id}
-                className={`group relative rounded-lg border transition-all duration-200 cursor-pointer ${
-                  currentSessionId === session.id
-                    ? 'bg-primary/10 border-primary/20 shadow-sm'
-                    : 'hover:bg-muted/50 border-transparent hover:border-border'
-                }`}
                 onClick={() => onSessionSelect(session.id)}
+                className={cn(
+                  "p-3 rounded-lg cursor-pointer transition-all duration-200 hover:bg-muted/50",
+                  currentSessionId === session.id 
+                    ? "bg-primary/10 border border-primary/20" 
+                    : "bg-muted/20 hover:bg-muted/40"
+                )}
               >
-                <div className="flex items-start gap-3 p-3">
-                  <div className={`flex-shrink-0 w-8 h-8 rounded-lg flex items-center justify-center ${
-                    currentSessionId === session.id
-                      ? 'bg-primary text-primary-foreground'
-                      : 'bg-muted text-muted-foreground'
-                  }`}>
-                    <MessageSquare className="w-4 h-4" />
-                  </div>
-                  <div className="flex-1 min-w-0">
-                    <h4 className="text-sm font-medium text-foreground truncate">
-                      {session.title}
-                    </h4>
-                    {session.context_summary && (
-                      <p className="text-xs text-muted-foreground mt-1 truncate">
-                        {session.context_summary}
-                      </p>
-                    )}
-                    <div className="flex items-center gap-3 mt-2 text-xs text-muted-foreground">
-                      <div className="flex items-center gap-1">
-                        <MessageSquare className="w-3 h-3" />
-                        <span>{session.message_count}</span>
-                      </div>
-                      <div className="flex items-center gap-1">
-                        <Clock className="w-3 h-3" />
-                        <span>{new Date(session.updated_at).toLocaleDateString()}</span>
-                      </div>
-                    </div>
-                  </div>
+                <div className="flex items-center justify-between">
+                  <h4 className="font-medium text-sm truncate flex-1">
+                    {session.title}
+                  </h4>
                   <Button
                     variant="ghost"
                     size="icon"
@@ -206,9 +164,14 @@ const ChatHistory = React.memo(({
                     <Trash2 className="h-3 w-3" />
                   </Button>
                 </div>
-                {currentSessionId === session.id && (
-                  <div className="absolute left-0 top-1/2 -translate-y-1/2 w-1 h-8 bg-primary rounded-r"></div>
-                )}
+                <div className="flex items-center gap-2 mt-1">
+                  <Badge variant="outline" className="text-xs">
+                    {session.message_count} messages
+                  </Badge>
+                  <span className="text-xs text-muted-foreground">
+                    {new Date(session.last_message_at).toLocaleDateString()}
+                  </span>
+                </div>
               </div>
             ))
           )}
@@ -218,551 +181,261 @@ const ChatHistory = React.memo(({
   );
 });
 
-ChatHistory.displayName = 'ChatHistory';
+export function ChatBot() {
+  const { 
+    user, 
+    isAuthenticated, 
+    isAdmin, 
+    logout, 
+    usage, 
+    updateUsage, 
+    canSendMessage, 
+    getRemainingMessages, 
+    getQuotaLimit 
+  } = useAuth();
 
-export default function ChatBot() {
-  // Core State
+  // State management
   const [messages, setMessages] = useState<Message[]>([]);
   const [input, setInput] = useState('');
   const [isLoading, setIsLoading] = useState(false);
-  const [isTyping, setIsTyping] = useState(false);
-  const [error, setError] = useState<string | null>(null);
-  const [currentSessionId, setCurrentSessionId] = useState<string | null>(null);
-
-  // UI State
   const [showSidebar, setShowSidebar] = useState(false);
   const [showSettings, setShowSettings] = useState(false);
-  const [showUpload, setShowUpload] = useState(false);
   const [showLogin, setShowLogin] = useState(false);
-  const [showWelcome, setShowWelcome] = useState(true);
-  const [selectedFiles, setSelectedFiles] = useState<File[]>([]);
-
-  // Enhanced State
+  const [showUpload, setShowUpload] = useState(false);
+  const [selectedFiles, setSelectedFiles] = useState<UploadedFile[]>([]);
   const [chatSessions, setChatSessions] = useState<ChatSession[]>([]);
+  const [currentSessionId, setCurrentSessionId] = useState<string | null>(null);
   const [searchQuery, setSearchQuery] = useState('');
-  const [trendingTopics, setTrendingTopics] = useState<TrendingTopic[]>([]);
-  const [quotaUsed, setQuotaUsed] = useState(0);
-
-  // Voice State
+  const [showWelcome, setShowWelcome] = useState(true);
+  const [speechEnabled, setSpeechEnabled] = useState(false);
   const [voiceRecognition, setVoiceRecognition] = useState<VoiceRecognition>({
     isListening: false,
     isSupported: false,
     recognition: null
   });
-  const [speechEnabled, setSpeechEnabled] = useState(false);
 
   // Refs
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLTextAreaElement>(null);
-  const fileInputRef = useRef<HTMLInputElement>(null);
-  const abortControllerRef = useRef<AbortController | null>(null);
 
-  // Hooks
-  const { user, isAuthenticated, isLoading: authLoading, logout } = useAuth();
-  const { theme, setTheme } = useTheme();
-
-  // Get user role and quota
+  // Quota info
+  const quotaUsed = usage.messageCount;
+  const quotaLimit = getQuotaLimit();
   const userRole = user?.role || 'guest';
-  const quotaLimit = QUOTA_LIMITS[userRole as keyof typeof QUOTA_LIMITS];
-  const isQuotaExceeded = quotaUsed >= quotaLimit;
-
-  // Load chat sessions on mount
-  useEffect(() => {
-    if (user?.id) {
-      loadChatSessions();
-      loadQuotaUsage();
-    }
-  }, [user?.id]);
-
-  // Load trending topics
-  useEffect(() => {
-    loadTrendingTopics();
-  }, []);
 
   // Auto-scroll to bottom
-  useEffect(() => {
-    scrollToBottom();
-  }, [messages]);
-
-  // Initialize voice recognition
-  useEffect(() => {
-    initializeVoiceRecognition();
-  }, []);
-
-  // ========================================
-  // CORE FUNCTIONS
-  // ========================================
-
-  const loadChatSessions = useCallback(async () => {
-    if (!user?.id) return;
-    
-    try {
-      // Load from your database
-      const sessions: ChatSession[] = [];
-      setChatSessions(sessions);
-      
-      // Load last active session if no current session
-      if (!currentSessionId && sessions.length > 0) {
-        const lastSession = sessions.find(s => s.is_active) || sessions[0];
-        await loadSession(lastSession.id);
-      }
-    } catch (error) {
-      console.error('Error loading chat sessions:', error);
-    }
-  }, [user?.id, currentSessionId]);
-
-  const loadQuotaUsage = useCallback(async () => {
-    if (!user?.id) return;
-    
-    try {
-      // Load quota usage from your database
-      // For guest users, use localStorage
-      if (userRole === 'guest') {
-        const guestUsage = localStorage.getItem('guest-quota-usage');
-        setQuotaUsed(guestUsage ? parseInt(guestUsage) : 0);
-      } else {
-        // Load from database for authenticated users
-        setQuotaUsed(0); // Replace with actual database call
-      }
-    } catch (error) {
-      console.error('Error loading quota usage:', error);
-    }
-  }, [user?.id, userRole]);
-
-  const updateQuotaUsage = useCallback(() => {
-    const newUsage = quotaUsed + 1;
-    setQuotaUsed(newUsage);
-    
-    if (userRole === 'guest') {
-      localStorage.setItem('guest-quota-usage', newUsage.toString());
-    }
-    // For authenticated users, update database
-  }, [quotaUsed, userRole]);
-
-  const loadSession = useCallback(async (sessionId: string) => {
-    try {
-      setCurrentSessionId(sessionId);
-      const sessionMessages: Message[] = [];
-      setMessages(sessionMessages);
-      setShowWelcome(sessionMessages.length === 0);
-    } catch (error) {
-      console.error('Error loading session:', error);
-    }
-  }, []);
-
-  const createNewSession = useCallback(async () => {
-    if (!user?.id) return;
-    
-    try {
-      const title = `Chat ${new Date().toLocaleString()}`;
-      const newSessionId = `session_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
-      
-      setCurrentSessionId(newSessionId);
-      setMessages([]);
-      setShowWelcome(true);
-      await loadChatSessions();
-    } catch (error) {
-      console.error('Error creating new session:', error);
-    }
-  }, [user?.id, loadChatSessions]);
-
-  const loadTrendingTopics = useCallback(async () => {
-    try {
-      const topics = await TrendingAPI.getTrendingTopics();
-      setTrendingTopics(topics.slice(0, 4));
-    } catch (error) {
-      console.error('Error loading trending topics:', error);
-    }
-  }, []);
-
   const scrollToBottom = () => {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
   };
 
-  // ========================================
-  // ENHANCED FILE UPLOAD HANDLING
-  // ========================================
+  useEffect(() => {
+    scrollToBottom();
+  }, [messages]);
 
-  const handleFileSelect = useCallback((files: File[]) => {
-    setSelectedFiles(prev => [...prev, ...files]);
-  }, []);
-
-  const handleRemoveFile = useCallback((index: number) => {
-    setSelectedFiles(prev => prev.filter((_, i) => i !== index));
-  }, []);
-
-  const processFilesToBase64 = async (files: File[]): Promise<UploadedFile[]> => {
-    const processedFiles: UploadedFile[] = [];
-    
-    for (const file of files) {
-      try {
-        const base64 = await new Promise<string>((resolve, reject) => {
-          const reader = new FileReader();
-          reader.onload = () => {
-            const result = reader.result as string;
-            const base64Data = result.split(',')[1];
-            resolve(base64Data);
-          };
-          reader.onerror = reject;
-          reader.readAsDataURL(file);
-        });
-
-        processedFiles.push({
-          id: generateId(),
-          name: file.name,
-          originalName: file.name,
-          size: file.size,
-          type: file.type,
-          url: URL.createObjectURL(file),
-          base64
-        });
-      } catch (error) {
-        console.error('Error processing file:', file.name, error);
-      }
+  // Hide welcome when there are messages
+  useEffect(() => {
+    if (messages.length > 0) {
+      setShowWelcome(false);
+    } else {
+      setShowWelcome(true);
     }
-    
-    return processedFiles;
+  }, [messages]);
+
+  // Handle input changes
+  const handleInputChange = (e: React.ChangeEvent<HTMLTextAreaElement>) => {
+    setInput(e.target.value);
   };
 
-  // ========================================
-  // ENHANCED MESSAGE SENDING WITH QUOTA CHECK
-  // ========================================
-
-  const sendMessage = async (messageContent?: string, files?: File[]) => {
-    const content = messageContent || input.trim();
-    const filesToProcess = files || selectedFiles;
-    
-    if (!content && filesToProcess.length === 0) return;
-
-    // Check quota limit
-    if (isQuotaExceeded) {
-      setError(`You have reached your quota limit (${quotaLimit} messages). ${userRole === 'guest' ? 'Please login for more messages.' : 'Contact admin for quota increase.'}`);
-      return;
+  // Handle key press
+  const handleKeyPress = (e: React.KeyboardEvent) => {
+    if (e.key === 'Enter' && !e.shiftKey) {
+      e.preventDefault();
+      handleSendMessage();
     }
+  };
 
+  // Send message
+  const handleSendMessage = async () => {
+    if (!input.trim() && selectedFiles.length === 0) return;
+    if (!canSendMessage()) return;
+    if (isLoading) return;
+
+    const messageContent = input.trim();
+    const files = [...selectedFiles];
+    
     setInput('');
     setSelectedFiles([]);
-    setError(null);
     setIsLoading(true);
-    setIsTyping(true);
+
+    // Add user message
+    const userMessage: Message = {
+      id: generateId(),
+      content: messageContent,
+      role: 'user',
+      timestamp: new Date(),
+      attachments: files.length > 0 ? files : undefined,
+    };
+
+    setMessages(prev => [...prev, userMessage]);
 
     try {
-      // Process files to base64 if any
-      const processedFiles = filesToProcess.length > 0 
-        ? await processFilesToBase64(filesToProcess) 
-        : [];
-
-      // Create user message
-      const userMessage: Message = {
-        id: generateId(),
-        content,
-        role: 'user',
-        timestamp: new Date(),
-        attachments: processedFiles
-      };
-
-      setMessages(prev => [...prev, userMessage]);
-      setShowWelcome(false);
-
-      // Prepare API payload
-      const payload = {
-        message: content,
-        sessionId: currentSessionId || undefined,
-        attachments: processedFiles.map(file => ({
-          id: file.id,
+      // Prepare request data
+      const requestData = {
+        message: messageContent,
+        files: files.map(file => ({
           name: file.name,
           type: file.type,
-          mimeType: file.type,
-          size: file.size,
-          base64: file.base64
+          content: file.base64
         })),
-        settings: {
-          model: 'gemini-1.5-flash',
-          temperature: 0.7,
-          maxTokens: 4096
-        }
+        sessionId: currentSessionId,
+        userId: user?.id
       };
 
-      // Abort previous request if exists
-      if (abortControllerRef.current) {
-        abortControllerRef.current.abort();
-      }
-      abortControllerRef.current = new AbortController();
-
-      // Get auth token
-      const authToken = localStorage.getItem('auth_token');
-
-      // Make API request
+      // Send to API
       const response = await fetch('/api/chat', {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
-          ...(authToken && { 'Authorization': `Bearer ${authToken}` })
         },
-        body: JSON.stringify(payload),
-        signal: abortControllerRef.current.signal
+        body: JSON.stringify(requestData),
       });
 
       if (!response.ok) {
-        const errorData = await response.json().catch(() => ({}));
-        throw new Error(errorData.error || `HTTP error! status: ${response.status}`);
+        throw new Error('Failed to send message');
       }
 
       const data = await response.json();
 
-      if (data.success) {
-        // Create AI response message
-        const aiMessage: Message = {
-          id: data.messageId || generateId(),
-          content: data.response,
-          role: 'assistant',
-          timestamp: new Date(),
-          metadata: {
-            model: payload.settings.model,
-            temperature: payload.settings.temperature,
-            tokensUsed: data.usage?.tokensUsed
-          }
-        };
+      // Add AI response
+      const aiMessage: Message = {
+        id: generateId(),
+        content: data.response || 'Sorry, I could not process your request.',
+        role: 'assistant',
+        timestamp: new Date(),
+        metadata: data.metadata
+      };
 
-        setMessages(prev => [...prev, aiMessage]);
-        
-        // Update session ID if new
-        if (data.sessionId && !currentSessionId) {
-          setCurrentSessionId(data.sessionId);
-        }
+      setMessages(prev => [...prev, aiMessage]);
+      updateUsage('message');
 
-        // Update quota usage
-        updateQuotaUsage();
-
-        // Text-to-speech if enabled
-        if (speechEnabled && data.response) {
-          speakText(data.response);
-        }
-
-        // Reload sessions to update sidebar
-        if (user?.id) {
-          loadChatSessions();
-        }
-
-      } else {
-        throw new Error(data.error || 'Failed to get response from AI');
+      // Update session if provided
+      if (data.sessionId) {
+        setCurrentSessionId(data.sessionId);
       }
 
-    } catch (error: any) {
-      if (error.name === 'AbortError') {
-        return;
-      }
-      
+    } catch (error) {
       console.error('Error sending message:', error);
-      setError(error.message || 'Something went wrong. Please try again.');
+      
+      // Add error message
+      const errorMessage: Message = {
+        id: generateId(),
+        content: 'Sorry, there was an error processing your message. Please try again.',
+        role: 'assistant',
+        timestamp: new Date(),
+      };
+
+      setMessages(prev => [...prev, errorMessage]);
     } finally {
       setIsLoading(false);
-      setIsTyping(false);
     }
   };
 
-  // ========================================
-  // VOICE FUNCTIONALITY
-  // ========================================
-
-  const initializeVoiceRecognition = () => {
-    if ('webkitSpeechRecognition' in window || 'SpeechRecognition' in window) {
-      const SpeechRecognition = window.webkitSpeechRecognition || window.SpeechRecognition;
-      const recognition = new SpeechRecognition();
-      
-      recognition.continuous = false;
-      recognition.interimResults = false;
-      recognition.lang = 'id-ID';
-
-      recognition.onresult = (event) => {
-        const transcript = event.results[0][0].transcript;
-        setInput(transcript);
-      };
-
-      recognition.onerror = (event) => {
-        console.error('Speech recognition error:', event.error);
-        setVoiceRecognition(prev => ({ ...prev, isListening: false }));
-      };
-
-      recognition.onend = () => {
-        setVoiceRecognition(prev => ({ ...prev, isListening: false }));
-      };
-
-      setVoiceRecognition({
-        isListening: false,
-        isSupported: true,
-        recognition
-      });
-    }
+  // Handle file selection
+  const handleFileSelect = (files: UploadedFile[]) => {
+    setSelectedFiles(files);
+    setShowUpload(false);
   };
 
-  const startVoiceRecognition = () => {
-    if (voiceRecognition.recognition) {
-      voiceRecognition.recognition.start();
-      setVoiceRecognition(prev => ({ ...prev, isListening: true }));
-    }
+  const handleRemoveFile = (fileId: string) => {
+    setSelectedFiles(prev => prev.filter(f => f.id !== fileId));
   };
 
-  const stopVoiceRecognition = () => {
-    if (voiceRecognition.recognition) {
-      voiceRecognition.recognition.stop();
-      setVoiceRecognition(prev => ({ ...prev, isListening: false }));
-    }
-  };
-
-  const speakText = (text: string) => {
-    if ('speechSynthesis' in window) {
-      const utterance = new SpeechSynthesisUtterance(text);
-      utterance.lang = 'id-ID';
-      utterance.rate = 0.9;
-      utterance.pitch = 1;
-      speechSynthesis.speak(utterance);
-    }
-  };
-
-  // ========================================
-  // EVENT HANDLERS
-  // ========================================
-
-  const handleKeyPress = (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
-    if (e.key === 'Enter' && !e.shiftKey) {
-      e.preventDefault();
-      sendMessage();
-    }
+  // Session management
+  const createNewSession = () => {
+    setCurrentSessionId(null);
+    setMessages([]);
+    setShowSidebar(false);
   };
 
   const handleSessionSelect = (sessionId: string) => {
-    loadSession(sessionId);
+    setCurrentSessionId(sessionId);
+    // Load session messages here
+    setShowSidebar(false);
   };
 
-  const handleSessionDelete = async (sessionId: string) => {
-    try {
-      setChatSessions(prev => prev.filter(s => s.id !== sessionId));
-      if (currentSessionId === sessionId) {
-        setCurrentSessionId(null);
-        setMessages([]);
-        setShowWelcome(true);
-      }
-    } catch (error) {
-      console.error('Error deleting session:', error);
+  const handleSessionDelete = (sessionId: string) => {
+    setChatSessions(prev => prev.filter(s => s.id !== sessionId));
+    if (currentSessionId === sessionId) {
+      createNewSession();
     }
   };
 
+  // Handle navigation
   const handleHomeClick = () => {
-    setCurrentSessionId(null);
-    setMessages([]);
-    setShowWelcome(true);
+    createNewSession();
     setShowSidebar(false);
   };
 
   const handleSettingsClick = () => {
-    // Only admin can access full settings
-    if (userRole !== 'admin') {
-      setError('Only administrators can access full settings.');
-      return;
+    if (isAdmin) {
+      setShowSettings(true);
     }
-    setShowSettings(true);
   };
 
-  // ========================================
-  // RENDER
-  // ========================================
-
   return (
-    <div className="flex h-screen bg-background">
-      {/* Enhanced Sidebar with Chat History */}
+    <div className="h-screen flex bg-background">
+      {/* Sidebar */}
       <AnimatePresence>
         {showSidebar && (
           <motion.div
-            initial={{ x: -320, opacity: 0 }}
+            initial={{ x: -300, opacity: 0 }}
             animate={{ x: 0, opacity: 1 }}
-            exit={{ x: -320, opacity: 0 }}
-            transition={{ type: "spring", stiffness: 300, damping: 30 }}
-            className="fixed inset-y-0 left-0 z-50 w-80 bg-card/95 backdrop-blur-xl border-r lg:relative lg:translate-x-0"
+            exit={{ x: -300, opacity: 0 }}
+            transition={{ duration: 0.3, ease: "easeInOut" }}
+            className="fixed left-0 top-0 h-full w-80 bg-card border-r z-50 lg:relative lg:translate-x-0"
           >
             <div className="flex flex-col h-full">
               {/* Sidebar Header */}
               <div className="flex items-center justify-between p-4 border-b">
                 <div className="flex items-center gap-2">
-                  <History className="w-5 h-5 text-primary" />
-                  <span className="font-semibold">Chat History</span>
+                  <MessageSquare className="h-5 w-5" />
+                  <h2 className="font-semibold">Chat History</h2>
                 </div>
                 <div className="flex items-center gap-2">
-                  {user && (
-                    <Button
-                      variant="ghost"
-                      size="icon"
-                      onClick={createNewSession}
-                      className="h-8 w-8"
-                    >
-                      <Plus className="h-4 w-4" />
-                    </Button>
-                  )}
+                  <Button
+                    variant="ghost"
+                    size="icon"
+                    onClick={createNewSession}
+                    title="New conversation"
+                  >
+                    <Plus className="h-4 w-4" />
+                  </Button>
                   <Button
                     variant="ghost"
                     size="icon"
                     onClick={() => setShowSidebar(false)}
-                    className="h-8 w-8 lg:hidden"
+                    className="lg:hidden"
                   >
                     <X className="h-4 w-4" />
                   </Button>
                 </div>
               </div>
 
-              {/* User Info & Quota */}
-              <div className="p-4 border-b bg-muted/30">
-                <div className="flex items-center gap-3 mb-3">
-                  <div className="flex items-center gap-2">
-                    {userRole === 'admin' && <Crown className="w-4 h-4 text-yellow-500" />}
-                    {userRole === 'user' && <User className="w-4 h-4 text-blue-500" />}
-                    {userRole === 'guest' && <Bot className="w-4 h-4 text-gray-500" />}
-                    <span className="text-sm font-medium capitalize">{userRole}</span>
-                  </div>
-                  {user && (
-                    <Badge variant="secondary" className="text-xs">
-                      {user.email}
-                    </Badge>
-                  )}
-                </div>
-                
-                {/* Quota Display */}
-                <div className="space-y-2">
-                  <div className="flex items-center justify-between text-xs">
-                    <span className="text-muted-foreground">Messages Used</span>
-                    <span className={`font-medium ${isQuotaExceeded ? 'text-destructive' : 'text-foreground'}`}>
-                      {quotaUsed} / {quotaLimit === Infinity ? '∞' : quotaLimit}
-                    </span>
-                  </div>
-                  {quotaLimit !== Infinity && (
-                    <div className="w-full bg-secondary rounded-full h-2">
-                      <div 
-                        className={`h-2 rounded-full transition-all ${
-                          isQuotaExceeded ? 'bg-destructive' : 'bg-primary'
-                        }`}
-                        style={{ width: `${Math.min((quotaUsed / quotaLimit) * 100, 100)}%` }}
-                      />
-                    </div>
-                  )}
+              {/* Search */}
+              <div className="p-4 border-b">
+                <div className="relative">
+                  <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 h-4 w-4 text-muted-foreground" />
+                  <Input
+                    placeholder="Search conversations..."
+                    value={searchQuery}
+                    onChange={(e) => setSearchQuery(e.target.value)}
+                    className="pl-10"
+                  />
                 </div>
               </div>
 
-              {/* Search */}
-              {user && (
-                <div className="p-4 border-b">
-                  <div className="relative">
-                    <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 h-4 w-4 text-muted-foreground" />
-                    <Input
-                      placeholder="Search conversations..."
-                      value={searchQuery}
-                      onChange={(e) => setSearchQuery(e.target.value)}
-                      className="pl-10"
-                    />
-                  </div>
-                </div>
-              )}
-
-              {/* Chat Sessions List */}
-              {user ? (
+              {/* Chat Sessions */}
+              {isAuthenticated ? (
                 <ChatHistory
                   sessions={chatSessions}
                   currentSessionId={currentSessionId}
@@ -795,88 +468,23 @@ export default function ChatBot() {
 
       {/* Main Chat Area */}
       <div className="flex-1 flex flex-col min-w-0">
-        {/* Enhanced Header - FIXED: Only show "AI ChatBot" */}
-        <div className="flex items-center justify-between p-4 border-b bg-card/50 backdrop-blur-sm">
-          <div className="flex items-center gap-3">
-            {/* Sidebar Toggle - ALWAYS VISIBLE */}
-            <Button
-              variant="ghost"
-              size="icon"
-              onClick={() => setShowSidebar(!showSidebar)}
-            >
-              <Menu className="h-5 w-5" />
-            </Button>
-
-            {/* Home Button */}
-            <Button
-              variant="ghost"
-              size="icon"
-              onClick={handleHomeClick}
-            >
-              <Home className="h-5 w-5" />
-            </Button>
-
-            {/* Logo and Title - SIMPLIFIED */}
-            <div className="flex items-center gap-2">
-              <Logo size="sm" />
-              <h1 className="font-semibold text-lg">AI ChatBot</h1>
-            </div>
-          </div>
-
-          <div className="flex items-center gap-2">
-            {/* Theme Toggle */}
-            <Button
-              variant="ghost"
-              size="icon"
-              onClick={() => setTheme(theme === 'dark' ? 'light' : 'dark')}
-            >
-              {theme === 'dark' ? <Sun className="h-4 w-4" /> : <Moon className="h-4 w-4" />}
-            </Button>
-
-            {/* Voice Toggle */}
-            <Button
-              variant="ghost"
-              size="icon"
-              onClick={() => setSpeechEnabled(!speechEnabled)}
-            >
-              {speechEnabled ? <Volume2 className="h-4 w-4" /> : <VolumeX className="h-4 w-4" />}
-            </Button>
-
-            {/* Settings - Admin Only */}
-            <Button
-              variant="ghost"
-              size="icon"
-              onClick={handleSettingsClick}
-            >
-              <Settings className="h-4 w-4" />
-            </Button>
-
-            {/* Login/User Button */}
-            {user ? (
-              <div className="flex items-center gap-2">
-                <Button
-                  variant="ghost"
-                  size="sm"
-                  onClick={logout}
-                  className="flex items-center gap-2"
-                >
-                  {userRole === 'admin' && <Crown className="h-4 w-4 text-yellow-500" />}
-                  <span className="hidden md:inline">{user.email}</span>
-                  <span className="md:hidden">{userRole}</span>
-                </Button>
-              </div>
-            ) : (
-              <Button
-                onClick={() => setShowLogin(true)}
-                size="sm"
-                className="flex items-center gap-2"
-              >
-                <LogIn className="h-4 w-4" />
-                <span className="hidden md:inline">Login</span>
-              </Button>
-            )}
-          </div>
-        </div>
+        {/* Enhanced Navbar - UPDATED */}
+        <EnhancedNavbar
+          user={user}
+          isAuthenticated={isAuthenticated}
+          isAdmin={isAdmin}
+          notifications={0}
+          onMenuToggle={() => setShowSidebar(!showSidebar)}
+          onHomeClick={handleHomeClick}
+          onSettingsClick={handleSettingsClick}
+          onLoginClick={() => setShowLogin(true)}
+          onLogoutClick={logout}
+          onUploadClick={() => setShowUpload(true)}
+          onVoiceToggle={() => {/* Voice toggle logic */}}
+          onSpeechToggle={() => setSpeechEnabled(!speechEnabled)}
+          isVoiceActive={voiceRecognition.isListening}
+          isSpeechEnabled={speechEnabled}
+        />
 
         {/* Chat Messages Area */}
         <div className="flex-1 overflow-hidden">
@@ -890,7 +498,7 @@ export default function ChatBot() {
                   className="text-center py-12"
                 >
                   <Bot className="w-16 h-16 mx-auto mb-4 text-primary" />
-                  <h2 className="text-2xl font-bold mb-2">Welcome to AI ChatBot</h2>
+                  <h2 className="text-2xl font-bold mb-2">Welcome to AI Chatbot</h2>
                   <p className="text-muted-foreground mb-2">
                     Start a conversation by typing a message or uploading a file
                   </p>
@@ -898,74 +506,35 @@ export default function ChatBot() {
                   {/* Quota Information */}
                   <div className="mb-6">
                     <Badge variant="secondary" className="text-xs">
-                      {userRole === 'admin' ? 'Unlimited messages' : 
-                       `${quotaUsed}/${quotaLimit} messages used`}
+                      {userRole === 'admin' ? 
+                        'Unlimited messages' : 
+                        `${quotaUsed}/${quotaLimit} messages used today`
+                      }
                     </Badge>
                   </div>
-
-                  {/* Enhanced Trending Topics - FIXED CENTER */}
-                  {trendingTopics.length > 0 && (
-                    <div className="max-w-4xl mx-auto">
-                      <div className="grid grid-cols-1 md:grid-cols-2 gap-4 justify-items-center">
-                        {trendingTopics.map((topic, index) => (
-                          <motion.div
-                            key={index}
-                            initial={{ opacity: 0, y: 20 }}
-                            animate={{ opacity: 1, y: 0 }}
-                            transition={{ delay: index * 0.1 }}
-                            onClick={() => !isQuotaExceeded && sendMessage(topic.prompt)}
-                            className={`w-full max-w-md p-4 border rounded-lg cursor-pointer transition-all duration-200 ${
-                              isQuotaExceeded 
-                                ? 'opacity-50 cursor-not-allowed' 
-                                : 'hover:bg-muted/50 hover:border-primary/30 hover:scale-105'
-                            }`}
-                          >
-                            <div className="text-sm font-medium text-primary mb-2">
-                              {topic.category}
-                            </div>
-                            <div className="text-sm text-left">{topic.title}</div>
-                          </motion.div>
-                        ))}
-                      </div>
-                    </div>
-                  )}
-
-                  {/* Quota Warning */}
-                  {isQuotaExceeded && (
-                    <Alert className="mt-6 max-w-md mx-auto">
-                      <AlertTriangle className="h-4 w-4" />
-                      <AlertDescription>
-                        {userRole === 'guest' 
-                          ? 'You have reached the guest limit. Login for more messages.' 
-                          : 'You have reached your message limit. Contact admin for more quota.'}
-                      </AlertDescription>
-                    </Alert>
-                  )}
                 </motion.div>
               )}
 
               {/* Messages */}
-              <AnimatePresence>
-                {messages.map((message, index) => (
-                  <ChatMessage
-                    key={message.id}
-                    message={message}
-                    index={index}
-                    showTimestamp={true}
-                  />
-                ))}
-              </AnimatePresence>
+              {messages.map((message) => (
+                <ChatMessage
+                  key={message.id}
+                  message={message}
+                  isUser={message.role === 'user'}
+                  onCopy={() => navigator.clipboard.writeText(message.content)}
+                />
+              ))}
 
-              {/* Typing Indicator */}
-              {isTyping && (
+              {/* Loading indicator */}
+              {isLoading && (
                 <motion.div
                   initial={{ opacity: 0, y: 10 }}
                   animate={{ opacity: 1, y: 0 }}
-                  exit={{ opacity: 0, y: -10 }}
-                  className="flex items-center gap-2 text-muted-foreground"
+                  className="flex justify-start"
                 >
-                  <Bot className="w-4 h-4" />
-                  <LoadingDots />
+                  <div className="max-w-xs">
+                    <LoadingDots variant="thinking" />
+                  </div>
                 </motion.div>
               )}
 
@@ -974,32 +543,24 @@ export default function ChatBot() {
           </ScrollArea>
         </div>
 
-        {/* Enhanced Input Area */}
-        <div className="border-t bg-card/50 backdrop-blur-sm">
+        {/* Input Area */}
+        <div className="border-t bg-background/95 backdrop-blur supports-[backdrop-filter]:bg-background/60">
           <div className="max-w-4xl mx-auto p-4">
-            {/* Error Display */}
-            {error && (
-              <Alert className="mb-4">
-                <AlertTriangle className="h-4 w-4" />
-                <AlertDescription>{error}</AlertDescription>
-              </Alert>
-            )}
-
-            {/* Selected Files Display */}
+            {/* Selected Files Preview */}
             {selectedFiles.length > 0 && (
-              <div className="mb-4 flex flex-wrap gap-2">
-                {selectedFiles.map((file, index) => (
+              <div className="mb-3 flex flex-wrap gap-2">
+                {selectedFiles.map((file) => (
                   <div
-                    key={`${file.name}-${index}`}
-                    className="flex items-center gap-2 px-3 py-1 bg-muted rounded-full text-sm"
+                    key={file.id}
+                    className="flex items-center gap-2 bg-muted px-3 py-2 rounded-lg text-sm"
                   >
-                    <FileText className="w-3 h-3" />
-                    <span>{file.name}</span>
+                    <FileText className="h-4 w-4" />
+                    <span className="truncate max-w-32">{file.originalName}</span>
                     <Button
                       variant="ghost"
-                      size="sm"
-                      onClick={() => handleRemoveFile(index)}
-                      className="h-4 w-4 p-0 hover:bg-destructive/20"
+                      size="icon"
+                      className="h-4 w-4 p-0"
+                      onClick={() => handleRemoveFile(file.id)}
                     >
                       <X className="h-3 w-3" />
                     </Button>
@@ -1008,57 +569,30 @@ export default function ChatBot() {
               </div>
             )}
 
-            {/* Input Controls */}
+            {/* Input Form */}
             <div className="flex items-end gap-2">
               <div className="flex-1 relative">
                 <Textarea
                   ref={inputRef}
-                  placeholder={isQuotaExceeded 
-                    ? "Quota exceeded. Please login or contact admin." 
-                    : "Type your message... (Shift+Enter for new line)"
-                  }
                   value={input}
-                  onChange={(e) => setInput(e.target.value)}
+                  onChange={handleInputChange}
                   onKeyDown={handleKeyPress}
-                  disabled={isLoading || isQuotaExceeded}
-                  className="min-h-[60px] max-h-[120px] resize-none pr-20"
+                  placeholder={
+                    !canSendMessage() 
+                      ? "You've reached your daily message limit" 
+                      : "Type your message here..."
+                  }
+                  disabled={isLoading || !canSendMessage()}
+                  className="min-h-12 max-h-32 resize-none pr-12"
+                  rows={1}
                 />
-                <div className="absolute right-2 bottom-2 flex items-center gap-1">
-                  {/* Voice Input */}
-                  {voiceRecognition.isSupported && !isQuotaExceeded && (
-                    <Button
-                      variant="ghost"
-                      size="icon"
-                      onClick={voiceRecognition.isListening ? stopVoiceRecognition : startVoiceRecognition}
-                      disabled={isLoading}
-                      className="h-8 w-8"
-                    >
-                      {voiceRecognition.isListening ? (
-                        <MicOff className="h-4 w-4 text-red-500" />
-                      ) : (
-                        <Mic className="h-4 w-4" />
-                      )}
-                    </Button>
-                  )}
-                </div>
               </div>
 
-              {/* Upload Files Button */}
               <Button
-                variant="outline"
+                onClick={handleSendMessage}
+                disabled={(!input.trim() && selectedFiles.length === 0) || isLoading || !canSendMessage()}
                 size="icon"
-                onClick={() => setShowUpload(true)}
-                disabled={isLoading || isQuotaExceeded}
-                className="h-[60px]"
-              >
-                <Upload className="h-4 w-4" />
-              </Button>
-
-              {/* Send Button */}
-              <Button
-                onClick={() => sendMessage()}
-                disabled={(!input.trim() && selectedFiles.length === 0) || isLoading || isQuotaExceeded}
-                className="h-[60px] px-6 btn-primary"
+                className="h-12 w-12 shrink-0"
               >
                 {isLoading ? (
                   <Loader2 className="h-4 w-4 animate-spin" />
@@ -1122,7 +656,7 @@ export default function ChatBot() {
       </AnimatePresence>
 
       {/* Settings Modal - Admin Only */}
-      {showSettings && userRole === 'admin' && (
+      {showSettings && isAdmin && (
         <SettingsDialog
           isOpen={showSettings}
           onClose={() => setShowSettings(false)}

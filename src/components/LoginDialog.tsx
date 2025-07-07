@@ -2,25 +2,13 @@
 
 import React, { useState } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
-import { 
-  X, 
-  LogIn, 
-  Mail, 
-  Lock, 
-  Eye, 
-  EyeOff, 
-  Loader2,
-  AlertTriangle,
-  User,
-  Crown
-} from 'lucide-react';
+import { X, Mail, Lock, Eye, EyeOff, LogIn, User, Crown, Loader2, AlertCircle } from 'lucide-react';
 
 import { Button } from './ui/button';
 import { Input } from './ui/input';
 import { Label } from './ui/label';
+import { Dialog, DialogContent, DialogHeader, DialogTitle } from './ui/dialog';
 import { Alert, AlertDescription } from './ui/alert';
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from './ui/card';
-
 import { useAuth } from '@/context/AuthContext';
 
 interface LoginDialogProps {
@@ -29,233 +17,223 @@ interface LoginDialogProps {
 }
 
 export function LoginDialog({ isOpen, onClose }: LoginDialogProps) {
+  const { login, isLoading, error } = useAuth();
+  
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [showPassword, setShowPassword] = useState(false);
-  const [isLoading, setIsLoading] = useState(false);
-  const [error, setError] = useState<string | null>(null);
+  const [isSubmitting, setIsSubmitting] = useState(false);
+  const [validationErrors, setValidationErrors] = useState<{
+    email?: string;
+    password?: string;
+  }>({});
 
-  const { login } = useAuth();
+  const validateForm = () => {
+    const errors: { email?: string; password?: string } = {};
+    
+    if (!email) {
+      errors.email = 'Email is required';
+    } else if (!/\S+@\S+\.\S+/.test(email)) {
+      errors.email = 'Please enter a valid email';
+    }
+    
+    if (!password) {
+      errors.password = 'Password is required';
+    } else if (password.length < 3) {
+      errors.password = 'Password must be at least 3 characters';
+    }
+    
+    setValidationErrors(errors);
+    return Object.keys(errors).length === 0;
+  };
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    setError(null);
-    setIsLoading(true);
-
+    
+    if (!validateForm()) return;
+    
+    setIsSubmitting(true);
+    
     try {
-      // Validate input
-      if (!email.trim() || !password.trim()) {
-        throw new Error('Please fill in all fields');
+      const success = await login(email, password);
+      if (success) {
+        onClose();
+        setEmail('');
+        setPassword('');
       }
-
-      if (!email.includes('@')) {
-        throw new Error('Please enter a valid email address');
-      }
-
-      // Attempt login
-      await login(email, password);
-      
-      // Close dialog on success
-      onClose();
-      
-    } catch (error: any) {
+    } catch (error) {
       console.error('Login error:', error);
-      setError(error.message || 'Login failed. Please try again.');
     } finally {
-      setIsLoading(false);
+      setIsSubmitting(false);
     }
   };
 
   const handleClose = () => {
-    if (!isLoading) {
-      setEmail('');
-      setPassword('');
-      setError(null);
-      onClose();
-    }
+    setEmail('');
+    setPassword('');
+    setValidationErrors({});
+    onClose();
   };
 
-  if (!isOpen) return null;
-
   return (
-    <AnimatePresence>
-      <motion.div
-        initial={{ opacity: 0 }}
-        animate={{ opacity: 1 }}
-        exit={{ opacity: 0 }}
-        className="fixed inset-0 bg-background/80 backdrop-blur-sm z-50 flex items-center justify-center p-4"
-      >
-        <motion.div
-          initial={{ scale: 0.95, opacity: 0 }}
-          animate={{ scale: 1, opacity: 1 }}
-          exit={{ scale: 0.95, opacity: 0 }}
-          className="w-full max-w-md"
-        >
-          <Card className="border-2">
-            <CardHeader className="text-center relative">
-              <Button
-                variant="ghost"
-                size="icon"
-                onClick={handleClose}
-                disabled={isLoading}
-                className="absolute right-4 top-4 h-6 w-6"
-              >
-                <X className="h-4 w-4" />
-              </Button>
-              
-              <div className="flex justify-center mb-2">
-                <div className="p-3 rounded-full bg-primary/10">
-                  <LogIn className="w-6 h-6 text-primary" />
-                </div>
+    <Dialog open={isOpen} onOpenChange={handleClose}>
+      <DialogContent className="sm:max-w-md p-0 gap-0 bg-gradient-to-br from-background via-background to-muted/30">
+        {/* Header dengan Close Button */}
+        <DialogHeader className="relative p-6 pb-4">
+          <Button
+            variant="ghost"
+            size="icon"
+            onClick={handleClose}
+            className="absolute right-4 top-4 h-6 w-6 rounded-sm opacity-70 ring-offset-background transition-opacity hover:opacity-100 focus:outline-none focus:ring-2 focus:ring-ring focus:ring-offset-2"
+          >
+            <X className="h-4 w-4" />
+          </Button>
+          
+          <DialogTitle className="text-center">
+            <div className="flex flex-col items-center gap-3">
+              <div className="w-12 h-12 rounded-full bg-gradient-to-br from-emerald-500 to-blue-600 flex items-center justify-center">
+                <LogIn className="w-6 h-6 text-white" />
               </div>
-              
-              <CardTitle className="text-xl">Welcome Back</CardTitle>
-              <CardDescription>
-                Sign in to your account to access more features
-              </CardDescription>
-            </CardHeader>
-
-            <CardContent>
-              <form onSubmit={handleSubmit} className="space-y-4">
-                {/* Error Display */}
-                {error && (
-                  <Alert>
-                    <AlertTriangle className="h-4 w-4" />
-                    <AlertDescription>{error}</AlertDescription>
-                  </Alert>
-                )}
-
-                {/* Email Field */}
-                <div className="space-y-2">
-                  <Label htmlFor="email">Email Address</Label>
-                  <div className="relative">
-                    <Mail className="absolute left-3 top-1/2 transform -translate-y-1/2 h-4 w-4 text-muted-foreground" />
-                    <Input
-                      id="email"
-                      type="email"
-                      placeholder="Enter your email"
-                      value={email}
-                      onChange={(e) => setEmail(e.target.value)}
-                      disabled={isLoading}
-                      className="pl-10"
-                      required
-                    />
-                  </div>
-                </div>
-
-                {/* Password Field */}
-                <div className="space-y-2">
-                  <Label htmlFor="password">Password</Label>
-                  <div className="relative">
-                    <Lock className="absolute left-3 top-1/2 transform -translate-y-1/2 h-4 w-4 text-muted-foreground" />
-                    <Input
-                      id="password"
-                      type={showPassword ? 'text' : 'password'}
-                      placeholder="Enter your password"
-                      value={password}
-                      onChange={(e) => setPassword(e.target.value)}
-                      disabled={isLoading}
-                      className="pl-10 pr-10"
-                      required
-                    />
-                    <Button
-                      type="button"
-                      variant="ghost"
-                      size="icon"
-                      onClick={() => setShowPassword(!showPassword)}
-                      disabled={isLoading}
-                      className="absolute right-1 top-1/2 transform -translate-y-1/2 h-8 w-8"
-                    >
-                      {showPassword ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
-                    </Button>
-                  </div>
-                </div>
-
-                {/* Submit Button */}
-                <Button
-                  type="submit"
-                  disabled={isLoading || !email.trim() || !password.trim()}
-                  className="w-full"
-                >
-                  {isLoading ? (
-                    <>
-                      <Loader2 className="w-4 h-4 mr-2 animate-spin" />
-                      Signing In...
-                    </>
-                  ) : (
-                    <>
-                      <LogIn className="w-4 h-4 mr-2" />
-                      Sign In
-                    </>
-                  )}
-                </Button>
-              </form>
-
-              {/* Additional Info */}
-              <div className="mt-6 p-4 bg-muted/30 rounded-lg">
-                <h4 className="text-sm font-medium mb-2">Account Benefits:</h4>
-                <ul className="text-xs text-muted-foreground space-y-1">
-                  <li className="flex items-center gap-2">
-                    <User className="w-3 h-3" />
-                    Regular User: 25 messages per day
-                  </li>
-                  <li className="flex items-center gap-2">
-                    <Crown className="w-3 h-3" />
-                    Admin: Unlimited messages + Settings access
-                  </li>
-                  <li>• Save conversation history</li>
-                  <li>• Upload files and images</li>
-                  <li>• Voice features</li>
-                </ul>
-              </div>
-
-              {/* Demo Accounts (for development) */}
-              {process.env.NODE_ENV === 'development' && (
-                <div className="mt-4 p-4 bg-secondary/30 rounded-lg">
-                  <h4 className="text-sm font-medium mb-2">Demo Accounts:</h4>
-                  <div className="space-y-2 text-xs">
-                    <div className="flex items-center justify-between">
-                      <span>Admin: admin@example.com</span>
-                      <Button
-                        variant="outline"
-                        size="sm"
-                        onClick={() => {
-                          setEmail('admin@example.com');
-                          setPassword('admin123');
-                        }}
-                        disabled={isLoading}
-                      >
-                        Use
-                      </Button>
-                    </div>
-                    <div className="flex items-center justify-between">
-                      <span>User: user@example.com</span>
-                      <Button
-                        variant="outline"
-                        size="sm"
-                        onClick={() => {
-                          setEmail('user@example.com');
-                          setPassword('user123');
-                        }}
-                        disabled={isLoading}
-                      >
-                        Use
-                      </Button>
-                    </div>
-                  </div>
-                </div>
-              )}
-
-              {/* Footer */}
-              <div className="mt-6 text-center">
-                <p className="text-xs text-muted-foreground">
-                  New accounts can only be created by administrators.
+              <div>
+                <h2 className="text-xl font-bold bg-gradient-to-r from-emerald-600 to-blue-600 bg-clip-text text-transparent">
+                  Welcome Back
+                </h2>
+                <p className="text-sm text-muted-foreground mt-1">
+                  Sign in to continue to AI Chatbot
                 </p>
               </div>
-            </CardContent>
-          </Card>
-        </motion.div>
-      </motion.div>
-    </AnimatePresence>
+            </div>
+          </DialogTitle>
+        </DialogHeader>
+
+        <div className="p-6 pt-2">
+          {/* Error Alert */}
+          <AnimatePresence>
+            {error && (
+              <motion.div
+                initial={{ opacity: 0, y: -10 }}
+                animate={{ opacity: 1, y: 0 }}
+                exit={{ opacity: 0, y: -10 }}
+                className="mb-4"
+              >
+                <Alert variant="destructive">
+                  <AlertCircle className="h-4 w-4" />
+                  <AlertDescription>{error}</AlertDescription>
+                </Alert>
+              </motion.div>
+            )}
+          </AnimatePresence>
+
+          {/* Login Form */}
+          <form onSubmit={handleSubmit} className="space-y-4">
+            {/* Email Field */}
+            <div className="space-y-2">
+              <Label htmlFor="email" className="text-sm font-medium">
+                Email Address
+              </Label>
+              <div className="relative">
+                <Mail className="absolute left-3 top-3 h-4 w-4 text-muted-foreground" />
+                <Input
+                  id="email"
+                  type="email"
+                  placeholder="Enter your email"
+                  value={email}
+                  onChange={(e) => setEmail(e.target.value)}
+                  className={`pl-10 h-10 ${validationErrors.email ? 'border-destructive' : ''}`}
+                  disabled={isSubmitting || isLoading}
+                  autoComplete="email"
+                />
+              </div>
+              {validationErrors.email && (
+                <p className="text-sm text-destructive flex items-center gap-1">
+                  <AlertCircle className="h-3 w-3" />
+                  {validationErrors.email}
+                </p>
+              )}
+            </div>
+
+            {/* Password Field */}
+            <div className="space-y-2">
+              <Label htmlFor="password" className="text-sm font-medium">
+                Password
+              </Label>
+              <div className="relative">
+                <Lock className="absolute left-3 top-3 h-4 w-4 text-muted-foreground" />
+                <Input
+                  id="password"
+                  type={showPassword ? 'text' : 'password'}
+                  placeholder="Enter your password"
+                  value={password}
+                  onChange={(e) => setPassword(e.target.value)}
+                  className={`pl-10 pr-10 h-10 ${validationErrors.password ? 'border-destructive' : ''}`}
+                  disabled={isSubmitting || isLoading}
+                  autoComplete="current-password"
+                />
+                <Button
+                  type="button"
+                  variant="ghost"
+                  size="icon"
+                  onClick={() => setShowPassword(!showPassword)}
+                  className="absolute right-0 top-0 h-10 w-10 text-muted-foreground hover:text-foreground"
+                  disabled={isSubmitting || isLoading}
+                >
+                  {showPassword ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
+                </Button>
+              </div>
+              {validationErrors.password && (
+                <p className="text-sm text-destructive flex items-center gap-1">
+                  <AlertCircle className="h-3 w-3" />
+                  {validationErrors.password}
+                </p>
+              )}
+            </div>
+
+            {/* Submit Button */}
+            <Button
+              type="submit"
+              className="w-full h-10 bg-gradient-to-r from-emerald-500 to-blue-600 hover:from-emerald-600 hover:to-blue-700"
+              disabled={isSubmitting || isLoading}
+            >
+              {isSubmitting || isLoading ? (
+                <>
+                  <Loader2 className="w-4 h-4 mr-2 animate-spin" />
+                  Signing In...
+                </>
+              ) : (
+                <>
+                  <LogIn className="w-4 h-4 mr-2" />
+                  Sign In
+                </>
+              )}
+            </Button>
+          </form>
+
+          {/* Account Benefits Info */}
+          <div className="mt-6 p-4 bg-muted/30 rounded-lg">
+            <h4 className="text-sm font-medium mb-2">Account Benefits:</h4>
+            <ul className="text-xs text-muted-foreground space-y-1">
+              <li className="flex items-center gap-2">
+                <User className="w-3 h-3" />
+                Regular User: 25 messages per day
+              </li>
+              <li className="flex items-center gap-2">
+                <Crown className="w-3 h-3" />
+                Admin: Unlimited messages + Settings access
+              </li>
+              <li>• Save conversation history</li>
+              <li>• Upload files and images</li>
+              <li>• Voice features</li>
+            </ul>
+          </div>
+
+          {/* Footer Note */}
+          <div className="mt-4 text-center">
+            <p className="text-xs text-muted-foreground">
+              New accounts can only be created by administrators.
+            </p>
+          </div>
+        </div>
+      </DialogContent>
+    </Dialog>
   );
 }

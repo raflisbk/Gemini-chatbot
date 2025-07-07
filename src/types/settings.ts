@@ -37,7 +37,7 @@ export interface AppearanceSettings {
 
 // Default settings
 export const defaultModelSettings: ModelSettings = {
-  model: 'gemini-1.5-flash',
+  model: 'gemini-2.5-flash',
   temperature: 0.7,
   maxTokens: 8192,
   topP: 0.95,

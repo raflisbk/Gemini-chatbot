@@ -3,44 +3,47 @@
 import React, { useState, useEffect } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { 
-  X, 
   Settings, 
-  User, 
-  Palette, 
-  MessageSquare, 
+  X, 
   Bot, 
+  Palette, 
   Volume2, 
-  VolumeX,
-  Moon,
-  Sun,
-  Monitor,
+  Shield,
+  Save,
+  RotateCcw,
   Download,
   Upload,
-  RotateCcw,
-  Save,
-  Check,
-  Mic,
-  MicOff,
+  Sliders,
+  Users,
+  UserPlus,
+  Trash2,
+  Edit,
+  Crown,
+  User,
+  Mail,
+  Lock,
   Eye,
   EyeOff,
-  Zap,
-  Shield,
-  Database,
-  Bell
+  Loader2,
+  AlertCircle,
+  CheckCircle,
+  Search
 } from 'lucide-react';
 
 import { Button } from './ui/button';
 import { Input } from './ui/input';
 import { Label } from './ui/label';
-import { Switch } from './ui/switch';
 import { Slider } from './ui/slider';
+import { Switch } from './ui/switch';
+import { Textarea } from './ui/textarea';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from './ui/select';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from './ui/tabs';
+import { Dialog, DialogContent, DialogHeader, DialogTitle } from './ui/dialog';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from './ui/card';
 import { Badge } from './ui/badge';
+import { Alert, AlertDescription } from './ui/alert';
 import { ScrollArea } from './ui/scroll-area';
 import { Separator } from './ui/separator';
-import { Alert, AlertDescription } from './ui/alert';
 
 import { useAuth } from '@/context/AuthContext';
 import { useTheme } from 'next-themes';
@@ -50,191 +53,210 @@ interface SettingsDialogProps {
   onClose: () => void;
 }
 
-interface ModelSettings {
-  model: string;
-  temperature: number;
-  maxTokens: number;
-  topP: number;
-  frequencyPenalty: number;
-  presencePenalty: number;
+interface NewUser {
+  email: string;
+  name: string;
+  password: string;
+  role: 'admin' | 'user';
 }
 
-interface ChatSettings {
-  autoSave: boolean;
-  showTimestamps: boolean;
-  enableSounds: boolean;
-  compactMode: boolean;
-  autoScroll: boolean;
-  messageLimit: number;
-  typingIndicator: boolean;
-  readReceipts: boolean;
-}
-
-interface AppearanceSettings {
-  theme: 'light' | 'dark' | 'system';
-  fontSize: number;
-  fontFamily: string;
-  primaryColor: string;
-  borderRadius: number;
-  compactUI: boolean;
-  animations: boolean;
-  transparency: number;
-}
-
-interface VoiceSettings {
-  enabled: boolean;
-  autoSpeak: boolean;
-  voice: string;
-  rate: number;
-  pitch: number;
-  volume: number;
-  recognition: boolean;
-  language: string;
-}
-
-interface PrivacySettings {
-  saveHistory: boolean;
-  allowAnalytics: boolean;
-  shareUsageData: boolean;
-  encryptMessages: boolean;
-  autoDeleteAfter: number;
+interface ExistingUser {
+  id: string;
+  email: string;
+  name: string;
+  role: string;
+  is_active: boolean;
+  created_at: string;
+  message_count?: number;
 }
 
 export function SettingsDialog({ isOpen, onClose }: SettingsDialogProps) {
-  const [activeTab, setActiveTab] = useState('general');
+  const { 
+    isAdmin,
+    modelSettings,
+    chatSettings,
+    appearanceSettings,
+    voiceSettings,
+    privacySettings,
+    updateModelSettings,
+    updateChatSettings,
+    updateAppearanceSettings,
+    updateVoiceSettings,
+    updatePrivacySettings,
+    resetSettingsToDefaults,
+    exportSettings,
+    importSettings
+  } = useAuth();
+
+  const { setTheme } = useTheme();
+  
+  // Settings state
+  const [activeTab, setActiveTab] = useState('model');
   const [hasUnsavedChanges, setHasUnsavedChanges] = useState(false);
   const [isSaving, setIsSaving] = useState(false);
   const [lastSaved, setLastSaved] = useState<Date | null>(null);
 
-  // Settings State
-  const [modelSettings, setModelSettings] = useState<ModelSettings>({
-    model: 'gemini-1.5-flash',
-    temperature: 0.7,
-    maxTokens: 4096,
-    topP: 1.0,
-    frequencyPenalty: 0,
-    presencePenalty: 0
+  // User management state
+  const [users, setUsers] = useState<ExistingUser[]>([]);
+  const [loadingUsers, setLoadingUsers] = useState(false);
+  const [showAddUser, setShowAddUser] = useState(false);
+  const [searchUsers, setSearchUsers] = useState('');
+  const [newUser, setNewUser] = useState<NewUser>({
+    email: '',
+    name: '',
+    password: '',
+    role: 'user'
   });
+  const [showPassword, setShowPassword] = useState(false);
+  const [isCreatingUser, setIsCreatingUser] = useState(false);
+  const [userFormErrors, setUserFormErrors] = useState<{
+    email?: string;
+    name?: string;
+    password?: string;
+  }>({});
+  const [userActionMessage, setUserActionMessage] = useState<{
+    type: 'success' | 'error';
+    message: string;
+  } | null>(null);
 
-  const [chatSettings, setChatSettings] = useState<ChatSettings>({
-    autoSave: true,
-    showTimestamps: true,
-    enableSounds: false,
-    compactMode: false,
-    autoScroll: true,
-    messageLimit: 100,
-    typingIndicator: true,
-    readReceipts: true
-  });
-
-  const [appearanceSettings, setAppearanceSettings] = useState<AppearanceSettings>({
-    theme: 'system',
-    fontSize: 14,
-    fontFamily: 'Inter',
-    primaryColor: '#10b981',
-    borderRadius: 8,
-    compactUI: false,
-    animations: true,
-    transparency: 95
-  });
-
-  const [voiceSettings, setVoiceSettings] = useState<VoiceSettings>({
-    enabled: false,
-    autoSpeak: false,
-    voice: 'default',
-    rate: 1.0,
-    pitch: 1.0,
-    volume: 0.8,
-    recognition: false,
-    language: 'id-ID'
-  });
-
-  const [privacySettings, setPrivacySettings] = useState<PrivacySettings>({
-    saveHistory: true,
-    allowAnalytics: false,
-    shareUsageData: false,
-    encryptMessages: true,
-    autoDeleteAfter: 30
-  });
-
-  const { user, updateUsage } = useAuth();
-  const { theme, setTheme } = useTheme();
-
-  // Load settings on mount
-  useEffect(() => {
-    loadSettings();
-  }, []);
-
-  // Auto-save with debounce
-  useEffect(() => {
-    if (hasUnsavedChanges) {
-      const timer = setTimeout(() => {
-        saveSettings();
-      }, 1000); // Auto-save after 1 second of inactivity
-
-      return () => clearTimeout(timer);
-    }
-  }, [hasUnsavedChanges]);
-
-  // Apply theme changes immediately
-  useEffect(() => {
-    if (appearanceSettings.theme !== 'system') {
-      setTheme(appearanceSettings.theme);
-    }
-  }, [appearanceSettings.theme, setTheme]);
-
-  // Load settings from localStorage
-  const loadSettings = () => {
+  // Load users for admin
+  const loadUsers = async () => {
+    if (!isAdmin) return;
+    
+    setLoadingUsers(true);
     try {
-      const savedModelSettings = localStorage.getItem('ai-chatbot-model-settings');
-      const savedChatSettings = localStorage.getItem('ai-chatbot-chat-settings');
-      const savedAppearanceSettings = localStorage.getItem('ai-chatbot-appearance-settings');
-      const savedVoiceSettings = localStorage.getItem('ai-chatbot-voice-settings');
-      const savedPrivacySettings = localStorage.getItem('ai-chatbot-privacy-settings');
-
-      if (savedModelSettings) {
-        setModelSettings(prev => ({ ...prev, ...JSON.parse(savedModelSettings) }));
-      }
-      if (savedChatSettings) {
-        setChatSettings(prev => ({ ...prev, ...JSON.parse(savedChatSettings) }));
-      }
-      if (savedAppearanceSettings) {
-        setAppearanceSettings(prev => ({ ...prev, ...JSON.parse(savedAppearanceSettings) }));
-      }
-      if (savedVoiceSettings) {
-        setVoiceSettings(prev => ({ ...prev, ...JSON.parse(savedVoiceSettings) }));
-      }
-      if (savedPrivacySettings) {
-        setPrivacySettings(prev => ({ ...prev, ...JSON.parse(savedPrivacySettings) }));
+      const response = await fetch('/api/admin/users');
+      if (response.ok) {
+        const data = await response.json();
+        setUsers(data.users || []);
       }
     } catch (error) {
-      console.error('Failed to load settings:', error);
+      console.error('Failed to load users:', error);
+    } finally {
+      setLoadingUsers(false);
     }
   };
 
-  // Save settings to localStorage
-  const saveSettings = async () => {
+  // Create new user
+  const handleCreateUser = async (e: React.FormEvent) => {
+    e.preventDefault();
+    
+    // Validate form
+    const errors: typeof userFormErrors = {};
+    if (!newUser.email) errors.email = 'Email is required';
+    else if (!/\S+@\S+\.\S+/.test(newUser.email)) errors.email = 'Invalid email format';
+    if (!newUser.name) errors.name = 'Name is required';
+    if (!newUser.password) errors.password = 'Password is required';
+    else if (newUser.password.length < 6) errors.password = 'Password must be at least 6 characters';
+    
+    setUserFormErrors(errors);
+    if (Object.keys(errors).length > 0) return;
+
+    setIsCreatingUser(true);
+    try {
+      const response = await fetch('/api/admin/users', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(newUser)
+      });
+
+      const data = await response.json();
+      
+      if (response.ok) {
+        setUserActionMessage({
+          type: 'success',
+          message: `User ${newUser.email} created successfully!`
+        });
+        setNewUser({ email: '', name: '', password: '', role: 'user' });
+        setShowAddUser(false);
+        loadUsers(); // Refresh user list
+      } else {
+        setUserActionMessage({
+          type: 'error',
+          message: data.error || 'Failed to create user'
+        });
+      }
+    } catch (error) {
+      setUserActionMessage({
+        type: 'error',
+        message: 'Network error occurred'
+      });
+    } finally {
+      setIsCreatingUser(false);
+    }
+
+    // Clear message after 5 seconds
+    setTimeout(() => setUserActionMessage(null), 5000);
+  };
+
+  // Delete user
+  const handleDeleteUser = async (userId: string, userEmail: string) => {
+    if (!confirm(`Are you sure you want to delete user ${userEmail}?`)) return;
+
+    try {
+      const response = await fetch(`/api/admin/users/${userId}`, {
+        method: 'DELETE'
+      });
+
+      if (response.ok) {
+        setUserActionMessage({
+          type: 'success',
+          message: `User ${userEmail} deleted successfully!`
+        });
+        loadUsers(); // Refresh user list
+      } else {
+        const data = await response.json();
+        setUserActionMessage({
+          type: 'error',
+          message: data.error || 'Failed to delete user'
+        });
+      }
+    } catch (error) {
+      setUserActionMessage({
+        type: 'error',
+        message: 'Network error occurred'
+      });
+    }
+
+    setTimeout(() => setUserActionMessage(null), 5000);
+  };
+
+  // Toggle user active status
+  const handleToggleUserStatus = async (userId: string, currentStatus: boolean) => {
+    try {
+      const response = await fetch(`/api/admin/users/${userId}`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ is_active: !currentStatus })
+      });
+
+      if (response.ok) {
+        loadUsers(); // Refresh user list
+      }
+    } catch (error) {
+      console.error('Failed to toggle user status:', error);
+    }
+  };
+
+  // Filter users
+  const filteredUsers = users.filter(user =>
+    user.email.toLowerCase().includes(searchUsers.toLowerCase()) ||
+    user.name.toLowerCase().includes(searchUsers.toLowerCase())
+  );
+
+  useEffect(() => {
+    if (isOpen && isAdmin && activeTab === 'users') {
+      loadUsers();
+    }
+  }, [isOpen, activeTab, isAdmin]);
+
+  // Save settings
+  const handleSave = async () => {
     setIsSaving(true);
     try {
-      localStorage.setItem('ai-chatbot-model-settings', JSON.stringify(modelSettings));
-      localStorage.setItem('ai-chatbot-chat-settings', JSON.stringify(chatSettings));
-      localStorage.setItem('ai-chatbot-appearance-settings', JSON.stringify(appearanceSettings));
-      localStorage.setItem('ai-chatbot-voice-settings', JSON.stringify(voiceSettings));
-      localStorage.setItem('ai-chatbot-privacy-settings', JSON.stringify(privacySettings));
-      
+      // Settings are automatically saved to localStorage
       setHasUnsavedChanges(false);
       setLastSaved(new Date());
-      
-      // Trigger a custom event to notify other components
-      window.dispatchEvent(new CustomEvent('settingsUpdated', {
-        detail: {
-          modelSettings,
-          chatSettings,
-          appearanceSettings,
-          voiceSettings,
-          privacySettings
-        }
-      }));
     } catch (error) {
       console.error('Failed to save settings:', error);
     } finally {
@@ -242,668 +264,546 @@ export function SettingsDialog({ isOpen, onClose }: SettingsDialogProps) {
     }
   };
 
-  // Reset to defaults
-  const resetToDefaults = () => {
-    setModelSettings({
-      model: 'gemini-1.5-flash',
-      temperature: 0.7,
-      maxTokens: 4096,
-      topP: 1.0,
-      frequencyPenalty: 0,
-      presencePenalty: 0
-    });
-    setChatSettings({
-      autoSave: true,
-      showTimestamps: true,
-      enableSounds: false,
-      compactMode: false,
-      autoScroll: true,
-      messageLimit: 100,
-      typingIndicator: true,
-      readReceipts: true
-    });
-    setAppearanceSettings({
-      theme: 'system',
-      fontSize: 14,
-      fontFamily: 'Inter',
-      primaryColor: '#10b981',
-      borderRadius: 8,
-      compactUI: false,
-      animations: true,
-      transparency: 95
-    });
-    setVoiceSettings({
-      enabled: false,
-      autoSpeak: false,
-      voice: 'default',
-      rate: 1.0,
-      pitch: 1.0,
-      volume: 0.8,
-      recognition: false,
-      language: 'id-ID'
-    });
-    setPrivacySettings({
-      saveHistory: true,
-      allowAnalytics: false,
-      shareUsageData: false,
-      encryptMessages: true,
-      autoDeleteAfter: 30
-    });
-    setHasUnsavedChanges(true);
-  };
-
-  // Export settings
-  const exportSettings = () => {
-    const settings = {
-      modelSettings,
-      chatSettings,
-      appearanceSettings,
-      voiceSettings,
-      privacySettings,
-      exportedAt: new Date().toISOString(),
-      version: '2.0.0'
-    };
-    
-    const blob = new Blob([JSON.stringify(settings, null, 2)], { type: 'application/json' });
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement('a');
-    a.href = url;
-    a.download = `ai-chatbot-settings-${new Date().toISOString().split('T')[0]}.json`;
-    document.body.appendChild(a);
-    a.click();
-    document.body.removeChild(a);
-    URL.revokeObjectURL(url);
-  };
-
-  // Import settings
-  const importSettings = (event: React.ChangeEvent<HTMLInputElement>) => {
-    const file = event.target.files?.[0];
-    if (!file) return;
-
-    const reader = new FileReader();
-    reader.onload = (e) => {
-      try {
-        const settings = JSON.parse(e.target?.result as string);
-        
-        if (settings.modelSettings) setModelSettings(settings.modelSettings);
-        if (settings.chatSettings) setChatSettings(settings.chatSettings);
-        if (settings.appearanceSettings) setAppearanceSettings(settings.appearanceSettings);
-        if (settings.voiceSettings) setVoiceSettings(settings.voiceSettings);
-        if (settings.privacySettings) setPrivacySettings(settings.privacySettings);
-        
-        setHasUnsavedChanges(true);
-      } catch (error) {
-        console.error('Failed to import settings:', error);
-      }
-    };
-    reader.readAsText(file);
-  };
-
-  if (!isOpen) return null;
-
   return (
-    <AnimatePresence>
-      <motion.div
-        initial={{ opacity: 0 }}
-        animate={{ opacity: 1 }}
-        exit={{ opacity: 0 }}
-        className="fixed inset-0 bg-background/80 backdrop-blur-sm z-50 flex items-center justify-center p-4"
-      >
-        <motion.div
-          initial={{ scale: 0.95, opacity: 0 }}
-          animate={{ scale: 1, opacity: 1 }}
-          exit={{ scale: 0.95, opacity: 0 }}
-          className="bg-card rounded-lg border shadow-lg w-full max-w-4xl max-h-[90vh] flex flex-col"
-        >
-          {/* Header */}
-          <div className="flex items-center justify-between p-6 border-b">
-            <div className="flex items-center gap-2">
+    <Dialog open={isOpen} onOpenChange={onClose}>
+      <DialogContent className="max-w-4xl max-h-[90vh] p-0">
+        <DialogHeader className="p-6 pb-4 border-b">
+          <div className="flex items-center justify-between">
+            <DialogTitle className="flex items-center gap-2">
               <Settings className="w-5 h-5" />
-              <h2 className="text-xl font-semibold">Settings</h2>
-              {hasUnsavedChanges && (
-                <Badge variant="secondary" className="ml-2">
-                  {isSaving ? 'Saving...' : 'Unsaved changes'}
-                </Badge>
-              )}
-            </div>
-            <div className="flex items-center gap-2">
-              {lastSaved && (
-                <span className="text-xs text-muted-foreground">
-                  Last saved: {lastSaved.toLocaleTimeString()}
-                </span>
-              )}
-              <Button variant="ghost" size="icon" onClick={onClose}>
-                <X className="w-4 h-4" />
-              </Button>
-            </div>
+              Settings
+            </DialogTitle>
+            <Button variant="ghost" size="icon" onClick={onClose}>
+              <X className="w-4 h-4" />
+            </Button>
           </div>
+        </DialogHeader>
 
-          {/* Content */}
-          <div className="flex-1 overflow-hidden">
-            <Tabs value={activeTab} onValueChange={setActiveTab} className="h-full flex">
-              {/* Sidebar */}
-              <div className="w-64 border-r bg-muted/30">
-                <TabsList className="grid w-full grid-cols-1 h-auto bg-transparent p-2">
-                  <TabsTrigger value="general" className="justify-start gap-2 w-full">
-                    <Settings className="w-4 h-4" />
-                    General
-                  </TabsTrigger>
-                  <TabsTrigger value="model" className="justify-start gap-2 w-full">
-                    <Bot className="w-4 h-4" />
-                    AI Model
-                  </TabsTrigger>
-                  <TabsTrigger value="chat" className="justify-start gap-2 w-full">
-                    <MessageSquare className="w-4 h-4" />
-                    Chat
-                  </TabsTrigger>
-                  <TabsTrigger value="appearance" className="justify-start gap-2 w-full">
-                    <Palette className="w-4 h-4" />
-                    Appearance
-                  </TabsTrigger>
-                  <TabsTrigger value="voice" className="justify-start gap-2 w-full">
-                    <Volume2 className="w-4 h-4" />
-                    Voice
-                  </TabsTrigger>
-                  <TabsTrigger value="privacy" className="justify-start gap-2 w-full">
-                    <Shield className="w-4 h-4" />
-                    Privacy
-                  </TabsTrigger>
-                </TabsList>
-              </div>
+        <div className="flex-1 overflow-hidden">
+          <Tabs value={activeTab} onValueChange={setActiveTab} className="h-full flex flex-col">
+            <TabsList className="grid w-full grid-cols-6 m-4 mb-0">
+              <TabsTrigger value="model" className="flex items-center gap-2">
+                <Bot className="w-4 h-4" />
+                Model
+              </TabsTrigger>
+              <TabsTrigger value="chat" className="flex items-center gap-2">
+                <Sliders className="w-4 h-4" />
+                Chat
+              </TabsTrigger>
+              <TabsTrigger value="appearance" className="flex items-center gap-2">
+                <Palette className="w-4 h-4" />
+                Appearance
+              </TabsTrigger>
+              <TabsTrigger value="voice" className="flex items-center gap-2">
+                <Volume2 className="w-4 h-4" />
+                Voice
+              </TabsTrigger>
+              <TabsTrigger value="privacy" className="flex items-center gap-2">
+                <Shield className="w-4 h-4" />
+                Privacy
+              </TabsTrigger>
+              {isAdmin && (
+                <TabsTrigger value="users" className="flex items-center gap-2">
+                  <Users className="w-4 h-4" />
+                  Users
+                </TabsTrigger>
+              )}
+            </TabsList>
 
-              {/* Main Content */}
-              <div className="flex-1">
-                <ScrollArea className="h-full">
-                  <div className="p-6">
-                    {/* General Tab */}
-                    <TabsContent value="general" className="m-0 space-y-6">
-                      <Card>
-                        <CardHeader>
-                          <CardTitle>Profile Information</CardTitle>
-                          <CardDescription>
-                            Manage your account settings and preferences
-                          </CardDescription>
-                        </CardHeader>
-                        <CardContent className="space-y-4">
-                          {user && (
-                            <div className="space-y-4">
-                              <div>
-                                <Label htmlFor="email">Email</Label>
-                                <Input id="email" value={user.email} disabled />
-                              </div>
-                              <div>
-                                <Label htmlFor="name">Display Name</Label>
-                                <Input 
-                                  id="name" 
-                                  placeholder="Enter your name"
-                                  onChange={() => setHasUnsavedChanges(true)}
-                                />
-                              </div>
-                            </div>
-                          )}
-                        </CardContent>
-                      </Card>
-
-                      <Card>
-                        <CardHeader>
-                          <CardTitle>Settings Management</CardTitle>
-                          <CardDescription>
-                            Export, import, or reset your settings
-                          </CardDescription>
-                        </CardHeader>
-                        <CardContent className="space-y-4">
-                          <div className="flex gap-2">
-                            <Button onClick={exportSettings} variant="outline" size="sm">
-                              <Download className="w-4 h-4 mr-2" />
-                              Export Settings
-                            </Button>
-                            <Button variant="outline" size="sm" asChild>
-                              <label htmlFor="import-settings">
-                                <Upload className="w-4 h-4 mr-2" />
-                                Import Settings
-                              </label>
-                            </Button>
-                            <input
-                              id="import-settings"
-                              type="file"
-                              accept=".json"
-                              onChange={importSettings}
-                              className="hidden"
-                            />
-                            <Button onClick={resetToDefaults} variant="outline" size="sm">
-                              <RotateCcw className="w-4 h-4 mr-2" />
-                              Reset to Defaults
-                            </Button>
-                          </div>
-                        </CardContent>
-                      </Card>
-                    </TabsContent>
-
-                    {/* Model Tab */}
-                    <TabsContent value="model" className="m-0 space-y-6">
-                      <Card>
-                        <CardHeader>
-                          <CardTitle>AI Model Settings</CardTitle>
-                          <CardDescription>
-                            Configure how the AI responds to your messages
-                          </CardDescription>
-                        </CardHeader>
-                        <CardContent className="space-y-4">
-                          <div>
-                            <Label htmlFor="model">Model</Label>
-                            <Select 
-                              value={modelSettings.model} 
-                              onValueChange={(value: string) => { // FIXED: Add explicit type
-                                setModelSettings(prev => ({ ...prev, model: value }));
-                                setHasUnsavedChanges(true);
-                              }}
-                            >
-                              <SelectTrigger>
-                                <SelectValue />
-                              </SelectTrigger>
-                              <SelectContent>
-                                <SelectItem value="gemini-1.5-flash">Gemini 1.5 Flash</SelectItem>
-                                <SelectItem value="gemini-1.5-pro">Gemini 1.5 Pro</SelectItem>
-                                <SelectItem value="gemini-1.0-pro">Gemini 1.0 Pro</SelectItem>
-                              </SelectContent>
-                            </Select>
-                          </div>
-
-                          <div>
-                            <Label htmlFor="temperature">Temperature: {modelSettings.temperature}</Label>
-                            <Slider
-                              value={[modelSettings.temperature]}
-                              onValueChange={([value]) => {
-                                setModelSettings(prev => ({ ...prev, temperature: value }));
-                                setHasUnsavedChanges(true);
-                              }}
-                              max={2}
-                              min={0}
-                              step={0.1}
-                              className="mt-2"
-                            />
-                            <p className="text-xs text-muted-foreground mt-1">
-                              Higher values make output more random, lower values more focused
-                            </p>
-                          </div>
-
-                          <div>
-                            <Label htmlFor="maxTokens">Max Tokens: {modelSettings.maxTokens}</Label>
-                            <Slider
-                              value={[modelSettings.maxTokens]}
-                              onValueChange={([value]) => {
-                                setModelSettings(prev => ({ ...prev, maxTokens: value }));
-                                setHasUnsavedChanges(true);
-                              }}
-                              max={8192}
-                              min={512}
-                              step={256}
-                              className="mt-2"
-                            />
-                          </div>
-                        </CardContent>
-                      </Card>
-                    </TabsContent>
-
-                    {/* Chat Tab */}
-                    <TabsContent value="chat" className="m-0 space-y-6">
-                      <Card>
-                        <CardHeader>
-                          <CardTitle>Chat Behavior</CardTitle>
-                          <CardDescription>
-                            Customize how the chat interface behaves
-                          </CardDescription>
-                        </CardHeader>
-                        <CardContent className="space-y-4">
-                          <div className="flex items-center justify-between">
-                            <div>
-                              <Label htmlFor="autoSave">Auto-save conversations</Label>
-                              <p className="text-xs text-muted-foreground">
-                                Automatically save your chat history
-                              </p>
-                            </div>
-                            <Switch
-                              id="autoSave"
-                              checked={chatSettings.autoSave}
-                              onCheckedChange={(checked) => {
-                                setChatSettings(prev => ({ ...prev, autoSave: checked }));
-                                setHasUnsavedChanges(true);
-                              }}
-                            />
-                          </div>
-
-                          <div className="flex items-center justify-between">
-                            <div>
-                              <Label htmlFor="showTimestamps">Show timestamps</Label>
-                              <p className="text-xs text-muted-foreground">
-                                Display message timestamps
-                              </p>
-                            </div>
-                            <Switch
-                              id="showTimestamps"
-                              checked={chatSettings.showTimestamps}
-                              onCheckedChange={(checked) => {
-                                setChatSettings(prev => ({ ...prev, showTimestamps: checked }));
-                                setHasUnsavedChanges(true);
-                              }}
-                            />
-                          </div>
-
-                          <div className="flex items-center justify-between">
-                            <div>
-                              <Label htmlFor="enableSounds">Enable notification sounds</Label>
-                              <p className="text-xs text-muted-foreground">
-                                Play sounds for new messages
-                              </p>
-                            </div>
-                            <Switch
-                              id="enableSounds"
-                              checked={chatSettings.enableSounds}
-                              onCheckedChange={(checked) => {
-                                setChatSettings(prev => ({ ...prev, enableSounds: checked }));
-                                setHasUnsavedChanges(true);
-                              }}
-                            />
-                          </div>
-
-                          <div className="flex items-center justify-between">
-                            <div>
-                              <Label htmlFor="compactMode">Compact mode</Label>
-                              <p className="text-xs text-muted-foreground">
-                                Use compact message layout
-                              </p>
-                            </div>
-                            <Switch
-                              id="compactMode"
-                              checked={chatSettings.compactMode}
-                              onCheckedChange={(checked) => {
-                                setChatSettings(prev => ({ ...prev, compactMode: checked }));
-                                setHasUnsavedChanges(true);
-                              }}
-                            />
-                          </div>
-
-                          <div className="flex items-center justify-between">
-                            <div>
-                              <Label htmlFor="autoScroll">Auto-scroll to new messages</Label>
-                              <p className="text-xs text-muted-foreground">
-                                Automatically scroll to latest message
-                              </p>
-                            </div>
-                            <Switch
-                              id="autoScroll"
-                              checked={chatSettings.autoScroll}
-                              onCheckedChange={(checked) => {
-                                setChatSettings(prev => ({ ...prev, autoScroll: checked }));
-                                setHasUnsavedChanges(true);
-                              }}
-                            />
-                          </div>
-                        </CardContent>
-                      </Card>
-                    </TabsContent>
-
-                    {/* Appearance Tab */}
-                    <TabsContent value="appearance" className="m-0 space-y-6">
-                      <Card>
-                        <CardHeader>
-                          <CardTitle>Theme & Visual Settings</CardTitle>
-                          <CardDescription>
-                            Customize the look and feel of the interface
-                          </CardDescription>
-                        </CardHeader>
-                        <CardContent className="space-y-4">
-                          <div>
-                            <Label htmlFor="theme">Theme</Label>
-                            <Select 
-                              value={appearanceSettings.theme} 
-                              onValueChange={(value: 'light' | 'dark' | 'system') => {
-                                setAppearanceSettings(prev => ({ ...prev, theme: value }));
-                                setHasUnsavedChanges(true);
-                              }}
-                            >
-                              <SelectTrigger>
-                                <SelectValue />
-                              </SelectTrigger>
-                              <SelectContent>
-                                <SelectItem value="light">
-                                  <div className="flex items-center gap-2">
-                                    <Sun className="w-4 h-4" />
-                                    Light
-                                  </div>
-                                </SelectItem>
-                                <SelectItem value="dark">
-                                  <div className="flex items-center gap-2">
-                                    <Moon className="w-4 h-4" />
-                                    Dark
-                                  </div>
-                                </SelectItem>
-                                <SelectItem value="system">
-                                  <div className="flex items-center gap-2">
-                                    <Monitor className="w-4 h-4" />
-                                    System
-                                  </div>
-                                </SelectItem>
-                              </SelectContent>
-                            </Select>
-                          </div>
-
-                          <div>
-                            <Label htmlFor="fontSize">Font Size: {appearanceSettings.fontSize}px</Label>
-                            <Slider
-                              value={[appearanceSettings.fontSize]}
-                              onValueChange={([value]) => {
-                                setAppearanceSettings(prev => ({ ...prev, fontSize: value }));
-                                setHasUnsavedChanges(true);
-                              }}
-                              max={20}
-                              min={12}
-                              step={1}
-                              className="mt-2"
-                            />
-                          </div>
-
-                          <div className="flex items-center justify-between">
-                            <div>
-                              <Label htmlFor="animations">Enable animations</Label>
-                              <p className="text-xs text-muted-foreground">
-                                Show smooth transitions and effects
-                              </p>
-                            </div>
-                            <Switch
-                              id="animations"
-                              checked={appearanceSettings.animations}
-                              onCheckedChange={(checked) => {
-                                setAppearanceSettings(prev => ({ ...prev, animations: checked }));
-                                setHasUnsavedChanges(true);
-                              }}
-                            />
-                          </div>
-                        </CardContent>
-                      </Card>
-                    </TabsContent>
-
-                    {/* Voice Tab */}
-                    <TabsContent value="voice" className="m-0 space-y-6">
-                      <Card>
-                        <CardHeader>
-                          <CardTitle>Voice & Speech Settings</CardTitle>
-                          <CardDescription>
-                            Configure text-to-speech and voice recognition
-                          </CardDescription>
-                        </CardHeader>
-                        <CardContent className="space-y-4">
-                          <div className="flex items-center justify-between">
-                            <div>
-                              <Label htmlFor="voiceEnabled">Enable text-to-speech</Label>
-                              <p className="text-xs text-muted-foreground">
-                                Read AI responses aloud
-                              </p>
-                            </div>
-                            <Switch
-                              id="voiceEnabled"
-                              checked={voiceSettings.enabled}
-                              onCheckedChange={(checked) => {
-                                setVoiceSettings(prev => ({ ...prev, enabled: checked }));
-                                setHasUnsavedChanges(true);
-                              }}
-                            />
-                          </div>
-
-                          <div className="flex items-center justify-between">
-                            <div>
-                              <Label htmlFor="voiceRecognition">Enable voice input</Label>
-                              <p className="text-xs text-muted-foreground">
-                                Use speech-to-text for input
-                              </p>
-                            </div>
-                            <Switch
-                              id="voiceRecognition"
-                              checked={voiceSettings.recognition}
-                              onCheckedChange={(checked) => {
-                                setVoiceSettings(prev => ({ ...prev, recognition: checked }));
-                                setHasUnsavedChanges(true);
-                              }}
-                            />
-                          </div>
-
-                          <div>
-                            <Label htmlFor="voiceRate">Speech Rate: {voiceSettings.rate}</Label>
-                            <Slider
-                              value={[voiceSettings.rate]}
-                              onValueChange={([value]) => {
-                                setVoiceSettings(prev => ({ ...prev, rate: value }));
-                                setHasUnsavedChanges(true);
-                              }}
-                              max={2}
-                              min={0.5}
-                              step={0.1}
-                              className="mt-2"
-                            />
-                          </div>
-
-                          <div>
-                            <Label htmlFor="voiceVolume">Volume: {Math.round(voiceSettings.volume * 100)}%</Label>
-                            <Slider
-                              value={[voiceSettings.volume]}
-                              onValueChange={([value]) => {
-                                setVoiceSettings(prev => ({ ...prev, volume: value }));
-                                setHasUnsavedChanges(true);
-                              }}
-                              max={1}
-                              min={0}
-                              step={0.1}
-                              className="mt-2"
-                            />
-                          </div>
-                        </CardContent>
-                      </Card>
-                    </TabsContent>
-
-                    {/* Privacy Tab */}
-                    <TabsContent value="privacy" className="m-0 space-y-6">
-                      <Card>
-                        <CardHeader>
-                          <CardTitle>Privacy & Data Settings</CardTitle>
-                          <CardDescription>
-                            Control how your data is handled and stored
-                          </CardDescription>
-                        </CardHeader>
-                        <CardContent className="space-y-4">
-                          <div className="flex items-center justify-between">
-                            <div>
-                              <Label htmlFor="saveHistory">Save chat history</Label>
-                              <p className="text-xs text-muted-foreground">
-                                Store conversations for future reference
-                              </p>
-                            </div>
-                            <Switch
-                              id="saveHistory"
-                              checked={privacySettings.saveHistory}
-                              onCheckedChange={(checked) => {
-                                setPrivacySettings(prev => ({ ...prev, saveHistory: checked }));
-                                setHasUnsavedChanges(true);
-                              }}
-                            />
-                          </div>
-
-                          <div className="flex items-center justify-between">
-                            <div>
-                              <Label htmlFor="encryptMessages">Encrypt messages</Label>
-                              <p className="text-xs text-muted-foreground">
-                                Encrypt stored messages for security
-                              </p>
-                            </div>
-                            <Switch
-                              id="encryptMessages"
-                              checked={privacySettings.encryptMessages}
-                              onCheckedChange={(checked) => {
-                                setPrivacySettings(prev => ({ ...prev, encryptMessages: checked }));
-                                setHasUnsavedChanges(true);
-                              }}
-                            />
-                          </div>
-
-                          <div>
-                            <Label htmlFor="autoDelete">Auto-delete after (days): {privacySettings.autoDeleteAfter}</Label>
-                            <Slider
-                              value={[privacySettings.autoDeleteAfter]}
-                              onValueChange={([value]) => {
-                                setPrivacySettings(prev => ({ ...prev, autoDeleteAfter: value }));
-                                setHasUnsavedChanges(true);
-                              }}
-                              max={365}
-                              min={1}
-                              step={1}
-                              className="mt-2"
-                            />
-                            <p className="text-xs text-muted-foreground mt-1">
-                              Automatically delete conversations after this many days
-                            </p>
-                          </div>
-                        </CardContent>
-                      </Card>
-                    </TabsContent>
-                  </div>
-                </ScrollArea>
-              </div>
-            </Tabs>
-          </div>
-
-          {/* Footer */}
-          <div className="flex items-center justify-between p-6 border-t bg-muted/30">
-            <div className="flex items-center gap-2 text-sm text-muted-foreground">
-              {isSaving && (
-                <>
+            <ScrollArea className="flex-1 p-6">
+              {/* User Action Message */}
+              <AnimatePresence>
+                {userActionMessage && (
                   <motion.div
-                    animate={{ rotate: 360 }}
-                    transition={{ duration: 1, repeat: Infinity, ease: "linear" }}
+                    initial={{ opacity: 0, y: -10 }}
+                    animate={{ opacity: 1, y: 0 }}
+                    exit={{ opacity: 0, y: -10 }}
+                    className="mb-4"
                   >
-                    <Settings className="w-4 h-4" />
+                    <Alert variant={userActionMessage.type === 'success' ? 'default' : 'destructive'}>
+                      {userActionMessage.type === 'success' ? (
+                        <CheckCircle className="h-4 w-4" />
+                      ) : (
+                        <AlertCircle className="h-4 w-4" />
+                      )}
+                      <AlertDescription>{userActionMessage.message}</AlertDescription>
+                    </Alert>
                   </motion.div>
-                  <span>Saving settings...</span>
-                </>
-              )}
-              {!isSaving && lastSaved && (
-                <>
-                  <Check className="w-4 h-4 text-green-500" />
-                  <span>Settings saved automatically</span>
-                </>
-              )}
-            </div>
+                )}
+              </AnimatePresence>
 
-            <div className="flex items-center gap-2">
-              <Button variant="outline" onClick={onClose}>
-                Close
-              </Button>
-              <Button onClick={saveSettings} disabled={!hasUnsavedChanges || isSaving}>
-                <Save className="w-4 h-4 mr-2" />
-                {isSaving ? 'Saving...' : 'Save Now'}
-              </Button>
-            </div>
+              {/* Model Settings */}
+              <TabsContent value="model" className="mt-0 space-y-6">
+                <Card>
+                  <CardHeader>
+                    <CardTitle>AI Model Configuration</CardTitle>
+                    <CardDescription>Configure the AI model behavior and parameters</CardDescription>
+                  </CardHeader>
+                  <CardContent className="space-y-4">
+                    <div className="space-y-2">
+                      <Label htmlFor="model">Model</Label>
+                      <Select 
+                        value={modelSettings.model} 
+                        onValueChange={(value) => updateModelSettings({ model: value })}
+                      >
+                        <SelectTrigger>
+                          <SelectValue />
+                        </SelectTrigger>
+                        <SelectContent>
+                          <SelectItem value="gemini-1.5-flash">Gemini 1.5 Flash (Fast)</SelectItem>
+                          <SelectItem value="gemini-1.5-pro">Gemini 1.5 Pro (Accurate)</SelectItem>
+                        </SelectContent>
+                      </Select>
+                    </div>
+
+                    <div className="space-y-2">
+                      <Label htmlFor="temperature">Temperature: {modelSettings.temperature}</Label>
+                      <Slider
+                        value={[modelSettings.temperature]}
+                        onValueChange={(value) => updateModelSettings({ temperature: value[0] })}
+                        max={1}
+                        min={0}
+                        step={0.1}
+                        className="w-full"
+                      />
+                    </div>
+
+                    <div className="space-y-2">
+                      <Label htmlFor="maxTokens">Max Tokens</Label>
+                      <Input
+                        id="maxTokens"
+                        type="number"
+                        value={modelSettings.maxTokens}
+                        onChange={(e) => updateModelSettings({ maxTokens: parseInt(e.target.value) })}
+                        min={1}
+                        max={8192}
+                      />
+                    </div>
+
+                    <div className="space-y-2">
+                      <Label htmlFor="systemPrompt">System Prompt</Label>
+                      <Textarea
+                        id="systemPrompt"
+                        value={modelSettings.systemPrompt}
+                        onChange={(e) => updateModelSettings({ systemPrompt: e.target.value })}
+                        rows={4}
+                        placeholder="You are a helpful AI assistant..."
+                      />
+                    </div>
+                  </CardContent>
+                </Card>
+              </TabsContent>
+
+              {/* Chat Settings */}
+              <TabsContent value="chat" className="mt-0 space-y-6">
+                <Card>
+                  <CardHeader>
+                    <CardTitle>Chat Preferences</CardTitle>
+                    <CardDescription>Customize your chat experience</CardDescription>
+                  </CardHeader>
+                  <CardContent className="space-y-4">
+                    <div className="flex items-center justify-between">
+                      <div>
+                        <Label htmlFor="autoSave">Auto-save conversations</Label>
+                        <p className="text-sm text-muted-foreground">Automatically save your chat history</p>
+                      </div>
+                      <Switch
+                        id="autoSave"
+                        checked={chatSettings.autoSave}
+                        onCheckedChange={(checked) => updateChatSettings({ autoSave: checked })}
+                      />
+                    </div>
+
+                    <div className="flex items-center justify-between">
+                      <div>
+                        <Label htmlFor="soundEnabled">Sound notifications</Label>
+                        <p className="text-sm text-muted-foreground">Play sounds for notifications</p>
+                      </div>
+                      <Switch
+                        id="soundEnabled"
+                        checked={chatSettings.soundEnabled}
+                        onCheckedChange={(checked) => updateChatSettings({ soundEnabled: checked })}
+                      />
+                    </div>
+
+                    <div className="flex items-center justify-between">
+                      <div>
+                        <Label htmlFor="showTimestamps">Show timestamps</Label>
+                        <p className="text-sm text-muted-foreground">Display message timestamps</p>
+                      </div>
+                      <Switch
+                        id="showTimestamps"
+                        checked={chatSettings.showTimestamps}
+                        onCheckedChange={(checked) => updateChatSettings({ showTimestamps: checked })}
+                      />
+                    </div>
+                  </CardContent>
+                </Card>
+              </TabsContent>
+
+              {/* Appearance Settings */}
+              <TabsContent value="appearance" className="mt-0 space-y-6">
+                <Card>
+                  <CardHeader>
+                    <CardTitle>Appearance</CardTitle>
+                    <CardDescription>Customize the look and feel</CardDescription>
+                  </CardHeader>
+                  <CardContent className="space-y-4">
+                    <div className="space-y-2">
+                      <Label htmlFor="theme">Theme</Label>
+                      <Select 
+                        value={appearanceSettings.theme} 
+                        onValueChange={(value: any) => {
+                          updateAppearanceSettings({ theme: value });
+                          setTheme(value);
+                        }}
+                      >
+                        <SelectTrigger>
+                          <SelectValue />
+                        </SelectTrigger>
+                        <SelectContent>
+                          <SelectItem value="light">Light</SelectItem>
+                          <SelectItem value="dark">Dark</SelectItem>
+                          <SelectItem value="system">System</SelectItem>
+                        </SelectContent>
+                      </Select>
+                    </div>
+
+                    <div className="space-y-2">
+                      <Label htmlFor="fontSize">Font Size: {appearanceSettings.fontSize}px</Label>
+                      <Slider
+                        value={[appearanceSettings.fontSize]}
+                        onValueChange={(value) => updateAppearanceSettings({ fontSize: value[0] })}
+                        max={20}
+                        min={12}
+                        step={1}
+                        className="w-full"
+                      />
+                    </div>
+                  </CardContent>
+                </Card>
+              </TabsContent>
+
+              {/* Voice Settings */}
+              <TabsContent value="voice" className="mt-0 space-y-6">
+                <Card>
+                  <CardHeader>
+                    <CardTitle>Voice Settings</CardTitle>
+                    <CardDescription>Configure voice input and speech synthesis</CardDescription>
+                  </CardHeader>
+                  <CardContent className="space-y-4">
+                    <div className="flex items-center justify-between">
+                      <div>
+                        <Label htmlFor="voiceEnabled">Voice input</Label>
+                        <p className="text-sm text-muted-foreground">Enable voice recognition</p>
+                      </div>
+                      <Switch
+                        id="voiceEnabled"
+                        checked={voiceSettings.enabled}
+                        onCheckedChange={(checked) => updateVoiceSettings({ enabled: checked })}
+                      />
+                    </div>
+
+                    <div className="flex items-center justify-between">
+                      <div>
+                        <Label htmlFor="autoSpeak">Auto-speak responses</Label>
+                        <p className="text-sm text-muted-foreground">Automatically read AI responses</p>
+                      </div>
+                      <Switch
+                        id="autoSpeak"
+                        checked={voiceSettings.autoSpeak}
+                        onCheckedChange={(checked) => updateVoiceSettings({ autoSpeak: checked })}
+                      />
+                    </div>
+                  </CardContent>
+                </Card>
+              </TabsContent>
+
+              {/* Privacy Settings */}
+              <TabsContent value="privacy" className="mt-0 space-y-6">
+                <Card>
+                  <CardHeader>
+                    <CardTitle>Privacy & Security</CardTitle>
+                    <CardDescription>Control your privacy and data settings</CardDescription>
+                  </CardHeader>
+                  <CardContent className="space-y-4">
+                    <div className="flex items-center justify-between">
+                      <div>
+                        <Label htmlFor="saveHistory">Save chat history</Label>
+                        <p className="text-sm text-muted-foreground">Keep conversation history on device</p>
+                      </div>
+                      <Switch
+                        id="saveHistory"
+                        checked={privacySettings.saveHistory}
+                        onCheckedChange={(checked) => updatePrivacySettings({ saveHistory: checked })}
+                      />
+                    </div>
+
+                    <div className="flex items-center justify-between">
+                      <div>
+                        <Label htmlFor="allowAnalytics">Usage analytics</Label>
+                        <p className="text-sm text-muted-foreground">Help improve the service with usage data</p>
+                      </div>
+                      <Switch
+                        id="allowAnalytics"
+                        checked={privacySettings.allowAnalytics}
+                        onCheckedChange={(checked) => updatePrivacySettings({ allowAnalytics: checked })}
+                      />
+                    </div>
+                  </CardContent>
+                </Card>
+              </TabsContent>
+
+              {/* User Management - Admin Only */}
+              {isAdmin && (
+                <TabsContent value="users" className="mt-0 space-y-6">
+                  <Card>
+                    <CardHeader>
+                      <div className="flex items-center justify-between">
+                        <div>
+                          <CardTitle>User Management</CardTitle>
+                          <CardDescription>Manage user accounts and permissions</CardDescription>
+                        </div>
+                        <Button onClick={() => setShowAddUser(true)} className="flex items-center gap-2">
+                          <UserPlus className="w-4 h-4" />
+                          Add User
+                        </Button>
+                      </div>
+                    </CardHeader>
+                    <CardContent>
+                      {/* Search Users */}
+                      <div className="mb-4">
+                        <div className="relative">
+                          <Search className="absolute left-3 top-3 h-4 w-4 text-muted-foreground" />
+                          <Input
+                            placeholder="Search users by email or name..."
+                            value={searchUsers}
+                            onChange={(e) => setSearchUsers(e.target.value)}
+                            className="pl-10"
+                          />
+                        </div>
+                      </div>
+
+                      {/* Add User Form */}
+                      <AnimatePresence>
+                        {showAddUser && (
+                          <motion.div
+                            initial={{ opacity: 0, height: 0 }}
+                            animate={{ opacity: 1, height: 'auto' }}
+                            exit={{ opacity: 0, height: 0 }}
+                            className="mb-6 p-4 border rounded-lg bg-muted/30"
+                          >
+                            <div className="flex items-center justify-between mb-4">
+                              <h3 className="text-lg font-semibold">Add New User</h3>
+                              <Button variant="ghost" size="icon" onClick={() => setShowAddUser(false)}>
+                                <X className="w-4 h-4" />
+                              </Button>
+                            </div>
+                            
+                            <form onSubmit={handleCreateUser} className="space-y-4">
+                              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                                <div className="space-y-2">
+                                  <Label htmlFor="newUserEmail">Email</Label>
+                                  <div className="relative">
+                                    <Mail className="absolute left-3 top-3 h-4 w-4 text-muted-foreground" />
+                                    <Input
+                                      id="newUserEmail"
+                                      type="email"
+                                      placeholder="user@example.com"
+                                      value={newUser.email}
+                                      onChange={(e) => setNewUser({ ...newUser, email: e.target.value })}
+                                      className={`pl-10 ${userFormErrors.email ? 'border-destructive' : ''}`}
+                                    />
+                                  </div>
+                                  {userFormErrors.email && (
+                                    <p className="text-sm text-destructive">{userFormErrors.email}</p>
+                                  )}
+                                </div>
+
+                                <div className="space-y-2">
+                                  <Label htmlFor="newUserName">Full Name</Label>
+                                  <div className="relative">
+                                    <User className="absolute left-3 top-3 h-4 w-4 text-muted-foreground" />
+                                    <Input
+                                      id="newUserName"
+                                      placeholder="John Doe"
+                                      value={newUser.name}
+                                      onChange={(e) => setNewUser({ ...newUser, name: e.target.value })}
+                                      className={`pl-10 ${userFormErrors.name ? 'border-destructive' : ''}`}
+                                    />
+                                  </div>
+                                  {userFormErrors.name && (
+                                    <p className="text-sm text-destructive">{userFormErrors.name}</p>
+                                  )}
+                                </div>
+
+                                <div className="space-y-2">
+                                  <Label htmlFor="newUserPassword">Password</Label>
+                                  <div className="relative">
+                                    <Lock className="absolute left-3 top-3 h-4 w-4 text-muted-foreground" />
+                                    <Input
+                                      id="newUserPassword"
+                                      type={showPassword ? 'text' : 'password'}
+                                      placeholder="Password (min 6 chars)"
+                                      value={newUser.password}
+                                      onChange={(e) => setNewUser({ ...newUser, password: e.target.value })}
+                                      className={`pl-10 pr-10 ${userFormErrors.password ? 'border-destructive' : ''}`}
+                                    />
+                                    <Button
+                                      type="button"
+                                      variant="ghost"
+                                      size="icon"
+                                      onClick={() => setShowPassword(!showPassword)}
+                                      className="absolute right-0 top-0 h-10 w-10"
+                                    >
+                                      {showPassword ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
+                                    </Button>
+                                  </div>
+                                  {userFormErrors.password && (
+                                    <p className="text-sm text-destructive">{userFormErrors.password}</p>
+                                  )}
+                                </div>
+
+                                <div className="space-y-2">
+                                  <Label htmlFor="newUserRole">Role</Label>
+                                  <Select 
+                                    value={newUser.role} 
+                                    onValueChange={(value: 'admin' | 'user') => setNewUser({ ...newUser, role: value })}
+                                  >
+                                    <SelectTrigger>
+                                      <SelectValue />
+                                    </SelectTrigger>
+                                    <SelectContent>
+                                      <SelectItem value="user">User</SelectItem>
+                                      <SelectItem value="admin">Admin</SelectItem>
+                                    </SelectContent>
+                                  </Select>
+                                </div>
+                              </div>
+
+                              <div className="flex justify-end gap-2">
+                                <Button type="button" variant="outline" onClick={() => setShowAddUser(false)}>
+                                  Cancel
+                                </Button>
+                                <Button type="submit" disabled={isCreatingUser}>
+                                  {isCreatingUser ? (
+                                    <>
+                                      <Loader2 className="w-4 h-4 mr-2 animate-spin" />
+                                      Creating...
+                                    </>
+                                  ) : (
+                                    <>
+                                      <UserPlus className="w-4 h-4 mr-2" />
+                                      Create User
+                                    </>
+                                  )}
+                                </Button>
+                              </div>
+                            </form>
+                          </motion.div>
+                        )}
+                      </AnimatePresence>
+
+                      {/* Users List */}
+                      <div className="space-y-2">
+                        {loadingUsers ? (
+                          <div className="flex justify-center py-8">
+                            <Loader2 className="w-6 h-6 animate-spin" />
+                          </div>
+                        ) : filteredUsers.length === 0 ? (
+                          <div className="text-center py-8 text-muted-foreground">
+                            <Users className="w-12 h-12 mx-auto mb-4 opacity-50" />
+                            <p>No users found</p>
+                          </div>
+                        ) : (
+                          filteredUsers.map((user) => (
+                            <div key={user.id} className="flex items-center justify-between p-4 border rounded-lg">
+                              <div className="flex items-center gap-3">
+                                <div className="w-10 h-10 rounded-full bg-gradient-to-r from-emerald-500 to-blue-500 flex items-center justify-center text-white font-semibold">
+                                  {user.name.charAt(0).toUpperCase()}
+                                </div>
+                                <div>
+                                  <div className="flex items-center gap-2">
+                                    <h4 className="font-medium">{user.name}</h4>
+                                    <Badge variant={user.role === 'admin' ? 'default' : 'secondary'}>
+                                      {user.role === 'admin' ? (
+                                        <>
+                                          <Crown className="w-3 h-3 mr-1" />
+                                          Admin
+                                        </>
+                                      ) : (
+                                        <>
+                                          <User className="w-3 h-3 mr-1" />
+                                          User
+                                        </>
+                                      )}
+                                    </Badge>
+                                    {!user.is_active && (
+                                      <Badge variant="destructive">Inactive</Badge>
+                                    )}
+                                  </div>
+                                  <p className="text-sm text-muted-foreground">{user.email}</p>
+                                  <p className="text-xs text-muted-foreground">
+                                    Created: {new Date(user.created_at).toLocaleDateString()}
+                                    {user.message_count !== undefined && ` • Messages: ${user.message_count}`}
+                                  </p>
+                                </div>
+                              </div>
+                              
+                              <div className="flex items-center gap-2">
+                                <Button
+                                  variant="outline"
+                                  size="sm"
+                                  onClick={() => handleToggleUserStatus(user.id, user.is_active)}
+                                >
+                                  {user.is_active ? 'Deactivate' : 'Activate'}
+                                </Button>
+                                <Button
+                                  variant="destructive"
+                                  size="sm"
+                                  onClick={() => handleDeleteUser(user.id, user.email)}
+                                >
+                                  <Trash2 className="w-4 h-4" />
+                                </Button>
+                              </div>
+                            </div>
+                          ))
+                        )}
+                      </div>
+                    </CardContent>
+                  </Card>
+                </TabsContent>
+              )}
+            </ScrollArea>
+          </Tabs>
+        </div>
+
+        {/* Footer */}
+        <div className="border-t p-4 flex items-center justify-between">
+          <div className="flex items-center gap-4">
+            {lastSaved && (
+              <p className="text-xs text-muted-foreground">
+                Last saved: {lastSaved.toLocaleTimeString()}
+              </p>
+            )}
           </div>
-        </motion.div>
-      </motion.div>
-    </AnimatePresence>
+          
+          <div className="flex items-center gap-2">
+            <Button variant="outline" onClick={resetSettingsToDefaults}>
+              <RotateCcw className="w-4 h-4 mr-2" />
+              Reset
+            </Button>
+            <Button onClick={handleSave} disabled={isSaving}>
+              {isSaving ? (
+                <Loader2 className="w-4 h-4 mr-2 animate-spin" />
+              ) : (
+                <Save className="w-4 h-4 mr-2" />
+              )}
+              Save
+            </Button>
+          </div>
+        </div>
+      </DialogContent>
+    </Dialog>
   );
 }
