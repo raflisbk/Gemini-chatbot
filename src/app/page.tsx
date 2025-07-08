@@ -7,7 +7,7 @@ import { useEffect } from 'react';
 import { useRouter } from 'next/navigation';
 
 // FIXED: Use default import instead of named import
-import ChatBot from '@/components/ChatBot';
+import { ChatBot } from '@/components/ChatBot';
 
 export default function HomePage() {
   const { isAuthenticated, isLoading } = useAuth();

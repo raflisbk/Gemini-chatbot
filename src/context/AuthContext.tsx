@@ -190,11 +190,11 @@ const defaultUsageStats: UsageStats = {
 };
 
 const defaultModelSettings: ModelSettings = {
-  model: 'gemini-1.5-flash',
-  temperature: 0.7,
-  maxTokens: 4096,
+  model: 'gemini-2.5-flash',
+  temperature: 1.5,
+  maxTokens: 1024,
   systemPrompt: 'You are a helpful AI assistant. Respond naturally in Indonesian when appropriate.',
-  topP: 0.9,
+  topP: 1,
   topK: 40,
 };
 

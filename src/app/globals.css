@@ -1373,3 +1373,749 @@ html {
     padding: 0 !important;
   }
 }
+/* ========================================
+   TRENDING CARDS STYLING - ADD TO globals.css
+   ======================================== */
+
+/* Container untuk trending cards */
+.trending-cards-container {
+  width: 100%;
+  max-width: 64rem; /* max-w-4xl */
+  margin: 0 auto;
+  padding: 0 1rem;
+}
+
+/* Grid layout untuk cards */
+.trending-cards-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
+  gap: 1.5rem;
+  justify-items: center;
+  align-items: start;
+  width: 100%;
+  margin: 1.5rem 0;
+}
+
+/* Individual trending card */
+.trending-card {
+  width: 100%;
+  max-width: 380px;
+  min-height: 140px;
+  padding: 1.5rem;
+  border: 1px solid hsl(var(--border));
+  border-radius: 0.75rem;
+  background: hsl(var(--card));
+  cursor: pointer;
+  transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+  display: flex;
+  flex-direction: column;
+  justify-content: space-between;
+  position: relative;
+  overflow: hidden;
+  backdrop-filter: blur(8px);
+}
+
+/* Gradient overlay untuk hover effect */
+.trending-card::before {
+  content: '';
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  background: linear-gradient(135deg, 
+    transparent, 
+    hsl(var(--primary) / 0.05), 
+    transparent);
+  opacity: 0;
+  transition: opacity 0.3s ease;
+  pointer-events: none;
+}
+
+/* Hover effects */
+.trending-card:hover {
+  border-color: hsl(var(--primary) / 0.4);
+  background: hsl(var(--card));
+  box-shadow: 0 8px 25px hsl(var(--primary) / 0.15);
+  transform: translateY(-4px) scale(1.02);
+}
+
+.trending-card:hover::before {
+  opacity: 1;
+}
+
+/* Active/click effect */
+.trending-card:active {
+  transform: translateY(-2px) scale(1.01);
+}
+
+/* Category badge styling */
+.trending-card-category {
+  font-size: 0.75rem;
+  font-weight: 600;
+  color: hsl(var(--primary));
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  margin-bottom: 0.75rem;
+  background: hsl(var(--primary) / 0.1);
+  padding: 0.25rem 0.5rem;
+  border-radius: 0.375rem;
+  display: inline-block;
+  border: 1px solid hsl(var(--primary) / 0.2);
+}
+
+/* Title styling */
+.trending-card-title {
+  font-size: 0.9rem;
+  line-height: 1.4;
+  color: hsl(var(--foreground));
+  font-weight: 500;
+  flex-grow: 1;
+  margin-bottom: 0.75rem;
+  display: -webkit-box;
+  -webkit-line-clamp: 3;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+
+/* Hover lift effect */
+.hover-lift {
+  transition: transform 0.2s ease;
+}
+
+.hover-lift:hover {
+  transform: translateY(-1px);
+}
+
+/* ========================================
+   RESPONSIVE BREAKPOINTS
+   ======================================== */
+
+/* Large screens - 3 columns */
+@media (min-width: 1024px) {
+  .trending-cards-grid {
+    grid-template-columns: repeat(3, 1fr);
+    gap: 2rem;
+    max-width: 72rem;
+  }
+  
+  .trending-card {
+    max-width: 100%;
+    min-height: 150px;
+  }
+}
+
+/* Medium screens - 2 columns */
+@media (min-width: 768px) and (max-width: 1023px) {
+  .trending-cards-grid {
+    grid-template-columns: repeat(2, 1fr);
+    gap: 1.5rem;
+    max-width: 48rem;
+  }
+  
+  .trending-card {
+    max-width: 100%;
+    min-height: 130px;
+    padding: 1.25rem;
+  }
+  
+  .trending-card-title {
+    font-size: 0.85rem;
+  }
+}
+
+/* Small screens - 1 column */
+@media (max-width: 767px) {
+  .trending-cards-container {
+    padding: 0 0.75rem;
+  }
+  
+  .trending-cards-grid {
+    grid-template-columns: 1fr;
+    gap: 1rem;
+    max-width: 100%;
+  }
+  
+  .trending-card {
+    max-width: 100%;
+    min-height: 120px;
+    padding: 1rem;
+  }
+  
+  .trending-card-category {
+    font-size: 0.7rem;
+    margin-bottom: 0.5rem;
+    padding: 0.2rem 0.4rem;
+  }
+  
+  .trending-card-title {
+    font-size: 0.8rem;
+    margin-bottom: 0.5rem;
+  }
+}
+
+/* ========================================
+   LOADING STATES
+   ======================================== */
+
+.trending-card.loading {
+  pointer-events: none;
+  opacity: 0.6;
+}
+
+.trending-card .loading-skeleton {
+  background: linear-gradient(90deg, 
+    hsl(var(--muted)) 0%, 
+    hsl(var(--muted) / 0.8) 50%, 
+    hsl(var(--muted)) 100%);
+  background-size: 200% 100%;
+  animation: shimmer 2s infinite;
+  border-radius: 0.375rem;
+}
+
+@keyframes shimmer {
+  0% { background-position: -200% 0; }
+  100% { background-position: 200% 0; }
+}
+
+/* ========================================
+   DARK MODE ADJUSTMENTS
+   ======================================== */
+
+.dark .trending-card {
+  background: hsl(var(--card) / 0.8);
+  border-color: hsl(var(--border));
+}
+
+.dark .trending-card:hover {
+  background: hsl(var(--card));
+  box-shadow: 0 8px 25px hsl(var(--primary) / 0.25);
+}
+
+.dark .trending-card-category {
+  background: hsl(var(--primary) / 0.15);
+  border-color: hsl(var(--primary) / 0.3);
+}
+
+/* ========================================
+   ACCESSIBILITY IMPROVEMENTS
+   ======================================== */
+
+/* Focus visible untuk keyboard navigation */
+.trending-card:focus-visible {
+  outline: 2px solid hsl(var(--primary));
+  outline-offset: 2px;
+  border-radius: 0.75rem;
+}
+
+/* High contrast mode support */
+@media (prefers-contrast: high) {
+  .trending-card {
+    border: 2px solid hsl(var(--border));
+  }
+  
+  .trending-card:hover {
+    border: 2px solid hsl(var(--primary));
+  }
+  
+  .trending-card-category {
+    background: hsl(var(--primary));
+    color: hsl(var(--primary-foreground));
+  }
+}
+
+/* Reduced motion support */
+@media (prefers-reduced-motion: reduce) {
+  .trending-card,
+  .trending-card::before,
+  .hover-lift {
+    transition: none;
+  }
+  
+  .trending-card:hover {
+    transform: none;
+  }
+  
+  .loading-skeleton {
+    animation: none;
+  }
+}
+
+/* ========================================
+   PRINT STYLES
+   ======================================== */
+
+@media print {
+  .trending-cards-container {
+    display: none !important;
+  }
+}
+
+/* ========================================
+   GREEN THEME CONSISTENCY - ADD TO globals.css
+   ======================================== */
+
+/* Override untuk memastikan semua warna menggunakan emerald/green theme */
+
+/* Primary color override untuk konsistensi */
+:root {
+  --primary: 134 239 172; /* emerald-300 */
+  --primary-foreground: 6 78 59; /* emerald-900 */
+}
+
+.dark {
+  --primary: 52 211 153; /* emerald-400 */
+  --primary-foreground: 6 20 14; /* emerald-950 */
+}
+
+/* Header logo dan title */
+.chat-header .logo,
+.navbar .logo {
+  color: rgb(16 185 129); /* emerald-500 */
+}
+
+/* Trending cards category badge - pastikan hijau */
+.trending-card-category {
+  color: rgb(16 185 129) !important; /* emerald-500 */
+  background: rgb(16 185 129 / 0.1) !important; /* emerald-500/10 */
+  border-color: rgb(16 185 129 / 0.2) !important; /* emerald-500/20 */
+}
+
+/* Button primary override */
+.btn-primary,
+.bg-primary {
+  background: linear-gradient(to right, rgb(16 185 129), rgb(5 150 105)) !important; /* emerald-500 to emerald-600 */
+}
+
+.btn-primary:hover {
+  background: linear-gradient(to right, rgb(5 150 105), rgb(4 120 87)) !important; /* emerald-600 to emerald-700 */
+}
+
+/* Text primary override */
+.text-primary {
+  color: rgb(16 185 129) !important; /* emerald-500 */
+}
+
+/* Border primary override */
+.border-primary {
+  border-color: rgb(16 185 129) !important; /* emerald-500 */
+}
+
+/* Focus ring override */
+.focus\:ring-primary:focus {
+  ring-color: rgb(16 185 129 / 0.3) !important; /* emerald-500/30 */
+}
+
+/* Hover effects override */
+.hover\:text-primary:hover {
+  color: rgb(16 185 129) !important; /* emerald-500 */
+}
+
+.hover\:border-primary:hover {
+  border-color: rgb(16 185 129) !important; /* emerald-500 */
+}
+
+/* Badge primary override */
+.badge-primary {
+  background: rgb(16 185 129) !important; /* emerald-500 */
+  color: white !important;
+}
+
+/* Login button specific */
+.login-button {
+  background: linear-gradient(to right, rgb(16 185 129), rgb(5 150 105)) !important;
+  border: none !important;
+  color: white !important;
+}
+
+.login-button:hover {
+  background: linear-gradient(to right, rgb(5 150 105), rgb(4 120 87)) !important;
+}
+
+/* Logo component override */
+.logo-primary {
+  color: rgb(16 185 129) !important; /* emerald-500 */
+  fill: rgb(16 185 129) !important; /* emerald-500 */
+}
+
+/* Navbar title override */
+.navbar-title {
+  background: linear-gradient(to right, rgb(16 185 129), rgb(5 150 105)) !important;
+  -webkit-background-clip: text !important;
+  background-clip: text !important;
+  -webkit-text-fill-color: transparent !important;
+}
+
+/* Avatar fallback override */
+.avatar-fallback {
+  background: linear-gradient(to bottom right, rgb(16 185 129), rgb(5 150 105)) !important;
+  color: white !important;
+}
+
+/* Trending cards hover effect */
+.trending-card:hover {
+  border-color: rgb(16 185 129 / 0.4) !important; /* emerald-500/40 */
+  box-shadow: 0 8px 25px rgb(16 185 129 / 0.15) !important; /* emerald-500/15 */
+}
+
+/* Search input focus */
+input:focus {
+  ring-color: rgb(16 185 129 / 0.2) !important; /* emerald-500/20 */
+  border-color: rgb(16 185 129) !important; /* emerald-500 */
+}
+
+/* Welcome screen Bot icon */
+.welcome-bot-icon {
+  color: rgb(16 185 129) !important; /* emerald-500 */
+}
+
+/* ========================================
+   DARK MODE ADJUSTMENTS
+   ======================================== */
+
+.dark .text-primary {
+  color: rgb(52 211 153) !important; /* emerald-400 */
+}
+
+.dark .border-primary {
+  border-color: rgb(52 211 153) !important; /* emerald-400 */
+}
+
+.dark .trending-card-category {
+  color: rgb(52 211 153) !important; /* emerald-400 */
+  background: rgb(52 211 153 / 0.15) !important; /* emerald-400/15 */
+  border-color: rgb(52 211 153 / 0.3) !important; /* emerald-400/30 */
+}
+
+.dark .navbar-title {
+  background: linear-gradient(to right, rgb(52 211 153), rgb(16 185 129)) !important;
+  -webkit-background-clip: text !important;
+  background-clip: text !important;
+  -webkit-text-fill-color: transparent !important;
+}
+
+.dark .trending-card:hover {
+  border-color: rgb(52 211 153 / 0.4) !important; /* emerald-400/40 */
+  box-shadow: 0 8px 25px rgb(52 211 153 / 0.25) !important; /* emerald-400/25 */
+}
+
+/* ========================================
+   COMPONENT SPECIFIC OVERRIDES
+   ======================================== */
+
+/* Pastikan semua component menggunakan green theme */
+[data-theme="emerald"] {
+  --primary: 134 239 172;
+  --primary-foreground: 6 78 59;
+}
+
+/* Button variant override */
+.btn-emerald {
+  background: linear-gradient(135deg, rgb(16 185 129), rgb(5 150 105));
+  color: white;
+  border: none;
+  transition: all 0.2s ease;
+}
+
+.btn-emerald:hover {
+  background: linear-gradient(135deg, rgb(5 150 105), rgb(4 120 87));
+  transform: translateY(-1px);
+  box-shadow: 0 4px 12px rgb(16 185 129 / 0.25);
+}
+
+/* Gradient text utility */
+.text-gradient-emerald {
+  background: linear-gradient(to right, rgb(16 185 129), rgb(5 150 105));
+  -webkit-background-clip: text;
+  background-clip: text;
+  -webkit-text-fill-color: transparent;
+  font-weight: 600;
+}
+
+/* Green glow effect */
+.glow-emerald {
+  box-shadow: 0 0 20px rgb(16 185 129 / 0.3);
+}
+
+.glow-emerald:hover {
+  box-shadow: 0 0 30px rgb(16 185 129 / 0.5);
+}
+
+/* ========================================
+   TRENDING CARDS STYLING - ADD TO globals.css
+   ======================================== */
+
+/* Container untuk trending cards */
+.trending-cards-container {
+  width: 100%;
+  max-width: 64rem; /* max-w-4xl */
+  margin: 0 auto;
+  padding: 0 1rem;
+}
+
+/* Grid layout untuk cards */
+.trending-cards-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
+  gap: 1.5rem;
+  justify-items: center;
+  align-items: start;
+  width: 100%;
+  margin: 1.5rem 0;
+}
+
+/* Individual trending card */
+.trending-card {
+  width: 100%;
+  max-width: 380px;
+  min-height: 140px;
+  padding: 1.5rem;
+  border: 1px solid hsl(var(--border));
+  border-radius: 0.75rem;
+  background: hsl(var(--card));
+  cursor: pointer;
+  transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+  display: flex;
+  flex-direction: column;
+  justify-content: space-between;
+  position: relative;
+  overflow: hidden;
+  backdrop-filter: blur(8px);
+}
+
+/* Gradient overlay untuk hover effect */
+.trending-card::before {
+  content: '';
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  background: linear-gradient(135deg, 
+    transparent, 
+    rgb(16 185 129 / 0.05), /* emerald-500/5 */
+    transparent);
+  opacity: 0;
+  transition: opacity 0.3s ease;
+  pointer-events: none;
+}
+
+/* Hover effects */
+.trending-card:hover {
+  border-color: rgb(16 185 129 / 0.4); /* emerald-500/40 */
+  background: hsl(var(--card));
+  box-shadow: 0 8px 25px rgb(16 185 129 / 0.15); /* emerald-500/15 */
+  transform: translateY(-4px) scale(1.02);
+}
+
+.trending-card:hover::before {
+  opacity: 1;
+}
+
+/* Active/click effect */
+.trending-card:active {
+  transform: translateY(-2px) scale(1.01);
+}
+
+/* Category badge styling */
+.trending-card-category {
+  font-size: 0.75rem;
+  font-weight: 600;
+  color: rgb(16 185 129); /* emerald-500 */
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  margin-bottom: 0.75rem;
+  background: rgb(16 185 129 / 0.1); /* emerald-500/10 */
+  padding: 0.25rem 0.5rem;
+  border-radius: 0.375rem;
+  display: inline-block;
+  border: 1px solid rgb(16 185 129 / 0.2); /* emerald-500/20 */
+}
+
+/* Title styling */
+.trending-card-title {
+  font-size: 0.9rem;
+  line-height: 1.4;
+  color: hsl(var(--foreground));
+  font-weight: 500;
+  flex-grow: 1;
+  margin-bottom: 0.75rem;
+  display: -webkit-box;
+  -webkit-line-clamp: 3;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+
+/* Hover lift effect */
+.hover-lift {
+  transition: transform 0.2s ease;
+}
+
+.hover-lift:hover {
+  transform: translateY(-1px);
+}
+
+/* ========================================
+   RESPONSIVE BREAKPOINTS
+   ======================================== */
+
+/* Large screens - 3 columns */
+@media (min-width: 1024px) {
+  .trending-cards-grid {
+    grid-template-columns: repeat(3, 1fr);
+    gap: 2rem;
+    max-width: 72rem;
+  }
+  
+  .trending-card {
+    max-width: 100%;
+    min-height: 150px;
+  }
+}
+
+/* Medium screens - 2 columns */
+@media (min-width: 768px) and (max-width: 1023px) {
+  .trending-cards-grid {
+    grid-template-columns: repeat(2, 1fr);
+    gap: 1.5rem;
+    max-width: 48rem;
+  }
+  
+  .trending-card {
+    max-width: 100%;
+    min-height: 130px;
+    padding: 1.25rem;
+  }
+  
+  .trending-card-title {
+    font-size: 0.85rem;
+  }
+}
+
+/* Small screens - 1 column */
+@media (max-width: 767px) {
+  .trending-cards-container {
+    padding: 0 0.75rem;
+  }
+  
+  .trending-cards-grid {
+    grid-template-columns: 1fr;
+    gap: 1rem;
+    max-width: 100%;
+  }
+  
+  .trending-card {
+    max-width: 100%;
+    min-height: 120px;
+    padding: 1rem;
+  }
+  
+  .trending-card-category {
+    font-size: 0.7rem;
+    margin-bottom: 0.5rem;
+    padding: 0.2rem 0.4rem;
+  }
+  
+  .trending-card-title {
+    font-size: 0.8rem;
+    margin-bottom: 0.5rem;
+  }
+}
+
+/* ========================================
+   LOADING STATES
+   ======================================== */
+
+.trending-card.loading {
+  pointer-events: none;
+  opacity: 0.6;
+}
+
+.trending-card .loading-skeleton {
+  background: linear-gradient(90deg, 
+    hsl(var(--muted)) 0%, 
+    hsl(var(--muted) / 0.8) 50%, 
+    hsl(var(--muted)) 100%);
+  background-size: 200% 100%;
+  animation: shimmer 2s infinite;
+  border-radius: 0.375rem;
+}
+
+@keyframes shimmer {
+  0% { background-position: -200% 0; }
+  100% { background-position: 200% 0; }
+}
+
+/* ========================================
+   DARK MODE ADJUSTMENTS
+   ======================================== */
+
+.dark .trending-card {
+  background: hsl(var(--card) / 0.8);
+  border-color: hsl(var(--border));
+}
+
+.dark .trending-card:hover {
+  background: hsl(var(--card));
+  box-shadow: 0 8px 25px rgb(52 211 153 / 0.25); /* emerald-400/25 */
+}
+
+.dark .trending-card-category {
+  background: rgb(52 211 153 / 0.15); /* emerald-400/15 */
+  border-color: rgb(52 211 153 / 0.3); /* emerald-400/30 */
+  color: rgb(52 211 153); /* emerald-400 */
+}
+
+/* ========================================
+   ACCESSIBILITY IMPROVEMENTS
+   ======================================== */
+
+/* Focus visible untuk keyboard navigation */
+.trending-card:focus-visible {
+  outline: 2px solid rgb(16 185 129); /* emerald-500 */
+  outline-offset: 2px;
+  border-radius: 0.75rem;
+}
+
+/* High contrast mode support */
+@media (prefers-contrast: high) {
+  .trending-card {
+    border: 2px solid hsl(var(--border));
+  }
+  
+  .trending-card:hover {
+    border: 2px solid rgb(16 185 129); /* emerald-500 */
+  }
+  
+  .trending-card-category {
+    background: rgb(16 185 129); /* emerald-500 */
+    color: white;
+  }
+}
+
+/* Reduced motion support */
+@media (prefers-reduced-motion: reduce) {
+  .trending-card,
+  .trending-card::before,
+  .hover-lift {
+    transition: none;
+  }
+  
+  .trending-card:hover {
+    transform: none;
+  }
+  
+  .loading-skeleton {
+    animation: none;
+  }
+}
+
+/* ========================================
+   PRINT STYLES
+   ======================================== */
+
+@media print {
+  .trending-cards-container {
+    display: none !important;
+  }
+}

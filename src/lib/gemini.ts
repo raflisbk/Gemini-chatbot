@@ -27,8 +27,8 @@ interface FileAttachment {
 // Default settings (keeping existing values)
 const defaultSettings: ModelSettings = {
   temperature: 1.5,
-  maxTokens: 4096,
-  topP: 0.95,
+  maxTokens: 1028,
+  topP: 1,
   topK: 40,
   systemPrompt: 'You are a helpful AI assistant focused on Indonesian topics and trending discussions. Always respond in a friendly and informative manner.'
 };

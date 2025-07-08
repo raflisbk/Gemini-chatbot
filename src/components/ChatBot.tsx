@@ -53,6 +53,7 @@ import { ThemeToggle } from './ThemeToggle';
 import { SettingsDialog } from './SettingsDialog';
 import { LoginDialog } from './LoginDialog';
 import { EnhancedNavbar } from './EnhancedNavbar';
+import { TrendingCards } from './TrendingCards';
 
 // Context and Utilities
 import { useAuth } from '@/context/AuthContext';
@@ -60,7 +61,7 @@ import { useTheme } from 'next-themes';
 import { generateId, debounce, cn } from '@/lib/utils';
 import TrendingAPI from '@/lib/trendingAPI';
 
-// Types
+// Types - UPDATED TO MATCH FILE UPLOAD INTERFACE
 interface UploadedFile {
   id: string;
   name: string;
@@ -202,7 +203,10 @@ export function ChatBot() {
   const [showSettings, setShowSettings] = useState(false);
   const [showLogin, setShowLogin] = useState(false);
   const [showUpload, setShowUpload] = useState(false);
-  const [selectedFiles, setSelectedFiles] = useState<UploadedFile[]>([]);
+  
+  // FIXED: Change to File[] to match FileUpload interface
+  const [selectedFiles, setSelectedFiles] = useState<File[]>([]);
+  
   const [chatSessions, setChatSessions] = useState<ChatSession[]>([]);
   const [currentSessionId, setCurrentSessionId] = useState<string | null>(null);
   const [searchQuery, setSearchQuery] = useState('');
@@ -241,6 +245,19 @@ export function ChatBot() {
     }
   }, [messages]);
 
+  // UTILITY FUNCTION: Convert File to UploadedFile
+  const convertFileToUploadedFile = (file: File): UploadedFile => {
+    return {
+      id: generateId(),
+      name: file.name,
+      originalName: file.name,
+      size: file.size,
+      type: file.type,
+      url: '', // Will be set after upload
+      base64: undefined // Will be set if needed
+    };
+  };
+
   // Handle input changes
   const handleInputChange = (e: React.ChangeEvent<HTMLTextAreaElement>) => {
     setInput(e.target.value);
@@ -261,7 +278,8 @@ export function ChatBot() {
     if (isLoading) return;
 
     const messageContent = input.trim();
-    const files = [...selectedFiles];
+    // Convert File[] to UploadedFile[] for message storage
+    const uploadedFiles = selectedFiles.map(convertFileToUploadedFile);
     
     setInput('');
     setSelectedFiles([]);
@@ -273,7 +291,7 @@ export function ChatBot() {
       content: messageContent,
       role: 'user',
       timestamp: new Date(),
-      attachments: files.length > 0 ? files : undefined,
+      attachments: uploadedFiles.length > 0 ? uploadedFiles : undefined,
     };
 
     setMessages(prev => [...prev, userMessage]);
@@ -282,10 +300,10 @@ export function ChatBot() {
       // Prepare request data
       const requestData = {
         message: messageContent,
-        files: files.map(file => ({
+        files: selectedFiles.map(file => ({
           name: file.name,
           type: file.type,
-          content: file.base64
+          content: file // File object will be handled by the API
         })),
         sessionId: currentSessionId,
         userId: user?.id
@@ -340,14 +358,15 @@ export function ChatBot() {
     }
   };
 
-  // Handle file selection
-  const handleFileSelect = (files: UploadedFile[]) => {
+  // FIXED: Handle file selection with correct types
+  const handleFileSelect = (files: File[]) => {
     setSelectedFiles(files);
     setShowUpload(false);
   };
 
-  const handleRemoveFile = (fileId: string) => {
-    setSelectedFiles(prev => prev.filter(f => f.id !== fileId));
+  // FIXED: Handle remove file by index
+  const handleRemoveFile = (index: number) => {
+    setSelectedFiles(prev => prev.filter((_, i) => i !== index));
   };
 
   // Session management
@@ -380,6 +399,15 @@ export function ChatBot() {
     if (isAdmin) {
       setShowSettings(true);
     }
+  };
+
+  // ADDED: Handle trending topic selection
+  const handleTrendingTopicSelect = (prompt: string) => {
+    setInput(prompt);
+    // Auto-focus pada input setelah memilih topic
+    setTimeout(() => {
+      inputRef.current?.focus();
+    }, 100);
   };
 
   return (
@@ -504,7 +532,7 @@ export function ChatBot() {
                   </p>
                   
                   {/* Quota Information */}
-                  <div className="mb-6">
+                  <div className="mb-8">
                     <Badge variant="secondary" className="text-xs">
                       {userRole === 'admin' ? 
                         'Unlimited messages' : 
@@ -512,16 +540,24 @@ export function ChatBot() {
                       }
                     </Badge>
                   </div>
+
+                  {/* ADDED: Trending Topics Cards */}
+                  <div className="mt-8">
+                    <TrendingCards 
+                      onTopicSelect={handleTrendingTopicSelect}
+                      maxCards={6}
+                      className="max-w-4xl mx-auto"
+                    />
+                  </div>
                 </motion.div>
               )}
 
-              {/* Messages */}
-              {messages.map((message) => (
+              {/* Messages - FIXED: Remove onCopy prop as it's handled internally */}
+              {messages.map((message, index) => (
                 <ChatMessage
                   key={message.id}
                   message={message}
-                  isUser={message.role === 'user'}
-                  onCopy={() => navigator.clipboard.writeText(message.content)}
+                  index={index}
                 />
               ))}
 
@@ -549,18 +585,18 @@ export function ChatBot() {
             {/* Selected Files Preview */}
             {selectedFiles.length > 0 && (
               <div className="mb-3 flex flex-wrap gap-2">
-                {selectedFiles.map((file) => (
+                {selectedFiles.map((file, index) => (
                   <div
-                    key={file.id}
+                    key={`${file.name}-${index}`}
                     className="flex items-center gap-2 bg-muted px-3 py-2 rounded-lg text-sm"
                   >
                     <FileText className="h-4 w-4" />
-                    <span className="truncate max-w-32">{file.originalName}</span>
+                    <span className="truncate max-w-32">{file.name}</span>
                     <Button
                       variant="ghost"
                       size="icon"
                       className="h-4 w-4 p-0"
-                      onClick={() => handleRemoveFile(file.id)}
+                      onClick={() => handleRemoveFile(index)}
                     >
                       <X className="h-3 w-3" />
                     </Button>
@@ -618,7 +654,7 @@ export function ChatBot() {
         </div>
       </div>
 
-      {/* File Upload Modal */}
+      {/* File Upload Modal - FIXED: Correct prop types */}
       <AnimatePresence>
         {showUpload && (
           <motion.div
@@ -681,3 +717,6 @@ export function ChatBot() {
     </div>
   );
 }
+
+// FIXED: Add default export
+export default ChatBot;
