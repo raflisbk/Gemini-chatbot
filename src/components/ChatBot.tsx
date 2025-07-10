@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useState, useRef, useEffect, useCallback } from 'react';
+import React, { useState, useRef, useEffect, useCallback, useMemo } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { 
   Send, 
@@ -33,7 +33,12 @@ import {
   History,
   LogIn,
   Shield,
-  Crown
+  Crown,
+  Paperclip,
+  Image,
+  Music,
+  Video,
+  File
 } from 'lucide-react';
 
 // UI Components
@@ -43,55 +48,45 @@ import { Textarea } from './ui/textarea';
 import { ScrollArea } from './ui/scroll-area';
 import { Alert, AlertDescription } from './ui/alert';
 import { Badge } from './ui/badge';
+import { Card, CardContent } from './ui/card';
 
-// Custom Components - UPDATED IMPORTS
+// Enhanced Components
 import { ChatMessage } from './ChatMessage';
-import { FileUpload } from './FileUpload';
 import { LoadingDots } from './LoadingDots';
 import { Logo } from './Logo';
 import { ThemeToggle } from './ThemeToggle';
-import { SettingsDialog } from './SettingsDialog';
-import { LoginDialog } from './LoginDialog';
-import { EnhancedNavbar } from './EnhancedNavbar';
+import { CompactSettingsDialog } from './SettingsDialog';
+import { VoiceInput, SpeechButton } from './VoiceInput';
+import { FixedChatSidebar } from './ChatSidebar';
+import { MultimodalUpload } from './MultimodalUpload';
+import { MessageWithContinue } from './ContinueButton';
 import { TrendingCards } from './TrendingCards';
+import { EnhancedNavbar } from './EnhancedNavbar';
 
 // Context and Utilities
 import { useAuth } from '@/context/AuthContext';
-import { useTheme } from 'next-themes';
+import { useVoiceInput, useTextToSpeech } from '@/hooks/useVoiceInput';
+import { useChat } from '@/hooks/useChat';
 import { generateId, debounce, cn } from '@/lib/utils';
-import TrendingAPI from '@/lib/trendingAPI';
 
-// Types - UPDATED TO MATCH FILE UPLOAD INTERFACE
-interface UploadedFile {
-  id: string;
-  name: string;
-  originalName: string;
-  size: number;
-  type: string;
-  url: string;
-  base64?: string;
-}
-
-interface TrendingTopic {
-  title: string;
-  category: string;
-  source: string;
-  prompt: string;
-}
-
-interface VoiceRecognition {
-  isListening: boolean;
-  isSupported: boolean;
-  recognition: SpeechRecognition | null;
-}
-
+// Types
 interface Message {
   id: string;
   content: string;
   role: 'user' | 'assistant';
   timestamp: Date;
-  attachments?: UploadedFile[];
+  attachments?: FileAttachment[];
   metadata?: any;
+}
+
+interface FileAttachment {
+  id: string;
+  name: string;
+  type: string;
+  size: number;
+  mimeType: string;
+  base64: string;
+  url?: string;
 }
 
 interface ChatSession {
@@ -105,413 +100,406 @@ interface ChatSession {
   is_active: boolean;
   created_at: string;
   updated_at: string;
-  updatedAt: string;
   messages?: Message[];
 }
 
-// Simple ChatHistory component
-const ChatHistory = React.memo(({ 
-  sessions, 
-  currentSessionId, 
-  searchQuery, 
-  onSessionSelect, 
-  onSessionDelete, 
-  onNewSession 
-}: {
-  sessions: ChatSession[];
-  currentSessionId: string | null;
-  searchQuery: string;
-  onSessionSelect: (sessionId: string) => void;
-  onSessionDelete: (sessionId: string) => void;
-  onNewSession: () => void;
-}) => {
-  const filteredSessions = sessions.filter(session => 
-    session.title.toLowerCase().includes(searchQuery.toLowerCase())
-  );
+interface BrowserSupport {
+  speechRecognition: boolean;
+  speechSynthesis: boolean;
+  microphone: boolean;
+  browserName: string;
+  isSupported: boolean;
+}
 
-  return (
-    <div className="flex-1 flex flex-col min-h-0">
-      <ScrollArea className="flex-1">
-        <div className="p-2 space-y-2">
-          {filteredSessions.length === 0 ? (
-            <div className="text-center p-4 text-muted-foreground text-sm">
-              No conversations found
-            </div>
-          ) : (
-            filteredSessions.map((session) => (
-              <div
-                key={session.id}
-                onClick={() => onSessionSelect(session.id)}
-                className={cn(
-                  "p-3 rounded-lg cursor-pointer transition-all duration-200 hover:bg-muted/50",
-                  currentSessionId === session.id 
-                    ? "bg-primary/10 border border-primary/20" 
-                    : "bg-muted/20 hover:bg-muted/40"
-                )}
-              >
-                <div className="flex items-center justify-between">
-                  <h4 className="font-medium text-sm truncate flex-1">
-                    {session.title}
-                  </h4>
-                  <Button
-                    variant="ghost"
-                    size="icon"
-                    className="h-6 w-6 opacity-0 group-hover:opacity-100 transition-opacity"
-                    onClick={(e) => {
-                      e.stopPropagation();
-                      onSessionDelete(session.id);
-                    }}
-                  >
-                    <Trash2 className="h-3 w-3" />
-                  </Button>
-                </div>
-                <div className="flex items-center gap-2 mt-1">
-                  <Badge variant="outline" className="text-xs">
-                    {session.message_count} messages
-                  </Badge>
-                  <span className="text-xs text-muted-foreground">
-                    {new Date(session.last_message_at).toLocaleDateString()}
-                  </span>
-                </div>
-              </div>
-            ))
-          )}
-        </div>
-      </ScrollArea>
-    </div>
-  );
-});
+// Browser Support Hook
+const useBrowserSupport = (): BrowserSupport => {
+  const [support, setSupport] = useState<BrowserSupport>({
+    speechRecognition: false,
+    speechSynthesis: false,
+    microphone: false,
+    browserName: 'Unknown',
+    isSupported: false
+  });
+
+  useEffect(() => {
+    const checkSupport = async () => {
+      try {
+        // Browser detection
+        const userAgent = navigator.userAgent;
+        let browserName = 'Unknown';
+        
+        if (userAgent.includes('Edg')) browserName = 'Edge';
+        else if (userAgent.includes('Chrome')) browserName = 'Chrome';
+        else if (userAgent.includes('Firefox')) browserName = 'Firefox';
+        else if (userAgent.includes('Safari') && !userAgent.includes('Chrome')) browserName = 'Safari';
+
+        // Check Speech Recognition
+        const SpeechRecognition = (window as any).SpeechRecognition || (window as any).webkitSpeechRecognition;
+        const speechRecognition = !!SpeechRecognition;
+
+        // Check Speech Synthesis
+        const speechSynthesis = 'speechSynthesis' in window;
+
+        // Check Microphone Access
+        let microphone = false;
+        try {
+          if (navigator.mediaDevices && navigator.mediaDevices.getUserMedia) {
+            const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+            microphone = true;
+            stream.getTracks().forEach(track => track.stop());
+          }
+        } catch (error) {
+          microphone = false;
+        }
+
+        const isSupported = speechRecognition && speechSynthesis;
+
+        setSupport({
+          speechRecognition,
+          speechSynthesis,
+          microphone,
+          browserName,
+          isSupported
+        });
+      } catch (error) {
+        console.error('Browser support check failed:', error);
+      }
+    };
+
+    checkSupport();
+  }, []);
+
+  return support;
+};
 
 export function ChatBot() {
   const { 
     user, 
     isAuthenticated, 
     isAdmin, 
-    logout, 
-    usage, 
-    updateUsage, 
-    canSendMessage, 
-    getRemainingMessages, 
-    getQuotaLimit 
+    logout,
+    modelSettings,
+    chatSettings,
+    voiceSettings
   } = useAuth();
 
+  // Local state untuk sessions management
+  const [authSessions, setAuthSessions] = useState<ChatSession[]>([]);
+  const [authCurrentSessionId, setAuthCurrentSessionId] = useState<string | null>(null);
+
+  // Chat Hook
+  const {
+    messages,
+    isLoading,
+    error: chatError,
+    sendMessage,
+    continueMessage,
+    retryLastMessage,
+    canContinue,
+    clearMessages
+  } = useChat();
+
+  // Browser Support
+  const support = useBrowserSupport();
+
+  // Voice Input
+  const {
+    isSupported: voiceSupported,
+    isListening,
+    isProcessing,
+    transcript,
+    interimTranscript,
+    confidence,
+    error: voiceError,
+    startListening,
+    stopListening,
+    toggleListening,
+    clearTranscript,
+    resetError
+  } = useVoiceInput({
+    language: 'id-ID',
+    continuous: false,
+    interimResults: true
+  });
+
+  // Text to Speech
+  const {
+    isSpeaking,
+    speak,
+    stop: stopSpeaking
+  } = useTextToSpeech();
+
   // State management
-  const [messages, setMessages] = useState<Message[]>([]);
   const [input, setInput] = useState('');
-  const [isLoading, setIsLoading] = useState(false);
   const [showSidebar, setShowSidebar] = useState(false);
   const [showSettings, setShowSettings] = useState(false);
-  const [showLogin, setShowLogin] = useState(false);
   const [showUpload, setShowUpload] = useState(false);
-  
-  // FIXED: Change to File[] to match FileUpload interface
   const [selectedFiles, setSelectedFiles] = useState<File[]>([]);
-  
-  const [chatSessions, setChatSessions] = useState<ChatSession[]>([]);
-  const [currentSessionId, setCurrentSessionId] = useState<string | null>(null);
   const [searchQuery, setSearchQuery] = useState('');
-  const [showWelcome, setShowWelcome] = useState(true);
-  const [speechEnabled, setSpeechEnabled] = useState(false);
-  const [voiceRecognition, setVoiceRecognition] = useState<VoiceRecognition>({
-    isListening: false,
-    isSupported: false,
-    recognition: null
-  });
+  const [isVoiceEnabled, setIsVoiceEnabled] = useState(false);
+  const [autoSpeak, setAutoSpeak] = useState(false);
 
   // Refs
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLTextAreaElement>(null);
 
-  // Quota info
-  const quotaUsed = usage.messageCount;
-  const quotaLimit = getQuotaLimit();
-  const userRole = user?.role || 'guest';
-
   // Auto-scroll to bottom
-  const scrollToBottom = () => {
+  const scrollToBottom = useCallback(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
-  };
+  }, []);
 
   useEffect(() => {
     scrollToBottom();
-  }, [messages]);
+  }, [messages, scrollToBottom]);
 
-  // Hide welcome when there are messages
+  // Handle voice transcript
   useEffect(() => {
-    if (messages.length > 0) {
-      setShowWelcome(false);
-    } else {
-      setShowWelcome(true);
+    if (transcript && transcript.trim()) {
+      setInput(transcript);
+      clearTranscript();
     }
-  }, [messages]);
+  }, [transcript, clearTranscript]);
 
-  // UTILITY FUNCTION: Convert File to UploadedFile
-  const convertFileToUploadedFile = (file: File): UploadedFile => {
-    return {
-      id: generateId(),
-      name: file.name,
-      originalName: file.name,
-      size: file.size,
-      type: file.type,
-      url: '', // Will be set after upload
-      base64: undefined // Will be set if needed
-    };
-  };
+  // Handle interim transcript display
+  useEffect(() => {
+    if (interimTranscript && isListening) {
+      setInput(prev => prev + interimTranscript);
+    }
+  }, [interimTranscript, isListening]);
+
+  // Auto-speak AI responses
+  useEffect(() => {
+    if (autoSpeak && messages.length > 0) {
+      const lastMessage = messages[messages.length - 1];
+      if (lastMessage.role === 'assistant' && !isSpeaking) {
+        speak(lastMessage.content);
+      }
+    }
+  }, [messages, autoSpeak, isSpeaking, speak]);
+
+  // Load sessions untuk user yang authenticated
+  useEffect(() => {
+    if (isAuthenticated && user?.id) {
+      // Simulasi load sessions - replace dengan actual API call
+      const loadSessions = async () => {
+        try {
+          // Temporary mock data - replace dengan actual API
+          const mockSessions: ChatSession[] = [
+            {
+              id: 'session-1',
+              user_id: user.id,
+              title: 'Welcome Conversation',
+              message_count: 5,
+              last_message_at: new Date().toISOString(),
+              is_active: true,
+              created_at: new Date().toISOString(),
+              updated_at: new Date().toISOString(),
+              context_summary: 'Initial conversation about AI features'
+            }
+          ];
+          setAuthSessions(mockSessions);
+        } catch (error) {
+          console.error('Failed to load sessions:', error);
+        }
+      };
+      
+      loadSessions();
+    } else {
+      setAuthSessions([]);
+      setAuthCurrentSessionId(null);
+    }
+  }, [isAuthenticated, user?.id]);
 
   // Handle input changes
-  const handleInputChange = (e: React.ChangeEvent<HTMLTextAreaElement>) => {
+  const handleInputChange = useCallback((e: React.ChangeEvent<HTMLTextAreaElement>) => {
     setInput(e.target.value);
-  };
+  }, []);
 
   // Handle key press
-  const handleKeyPress = (e: React.KeyboardEvent) => {
+  const handleKeyPress = useCallback((e: React.KeyboardEvent) => {
     if (e.key === 'Enter' && !e.shiftKey) {
       e.preventDefault();
       handleSendMessage();
     }
-  };
+  }, []);
 
-  // Send message
-  const handleSendMessage = async () => {
-    if (!input.trim() && selectedFiles.length === 0) return;
-    if (!canSendMessage()) return;
-    if (isLoading) return;
+  // Process files for upload
+  const processFileAttachments = useCallback(async (files: File[]): Promise<FileAttachment[]> => {
+    const attachments: FileAttachment[] = [];
 
-    const messageContent = input.trim();
-    // Convert File[] to UploadedFile[] for message storage
-    const uploadedFiles = selectedFiles.map(convertFileToUploadedFile);
-    
-    setInput('');
-    setSelectedFiles([]);
-    setIsLoading(true);
+    for (const file of files) {
+      try {
+        const base64 = await new Promise<string>((resolve, reject) => {
+          const reader = new FileReader();
+          reader.onload = () => {
+            const result = reader.result as string;
+            const base64 = result.split(',')[1];
+            resolve(base64);
+          };
+          reader.onerror = reject;
+          reader.readAsDataURL(file);
+        });
 
-    // Add user message
-    const userMessage: Message = {
-      id: generateId(),
-      content: messageContent,
-      role: 'user',
-      timestamp: new Date(),
-      attachments: uploadedFiles.length > 0 ? uploadedFiles : undefined,
-    };
-
-    setMessages(prev => [...prev, userMessage]);
-
-    try {
-      // Prepare request data
-      const requestData = {
-        message: messageContent,
-        files: selectedFiles.map(file => ({
+        attachments.push({
+          id: generateId(),
           name: file.name,
           type: file.type,
-          content: file // File object will be handled by the API
-        })),
-        sessionId: currentSessionId,
-        userId: user?.id
-      };
+          size: file.size,
+          mimeType: file.type,
+          base64,
+          url: URL.createObjectURL(file)
+        });
+      } catch (error) {
+        console.error(`Error processing file ${file.name}:`, error);
+      }
+    }
 
-      // Send to API
-      const response = await fetch('/api/chat', {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify(requestData),
+    return attachments;
+  }, []);
+
+  // Send message
+  const handleSendMessage = useCallback(async () => {
+    if (!input.trim() && selectedFiles.length === 0) return;
+    if (isLoading) return;
+
+    try {
+      await sendMessage(input, {
+        files: selectedFiles,
+        sessionId: authCurrentSessionId || undefined
       });
 
-      if (!response.ok) {
-        throw new Error('Failed to send message');
-      }
-
-      const data = await response.json();
-
-      // Add AI response
-      const aiMessage: Message = {
-        id: generateId(),
-        content: data.response || 'Sorry, I could not process your request.',
-        role: 'assistant',
-        timestamp: new Date(),
-        metadata: data.metadata
-      };
-
-      setMessages(prev => [...prev, aiMessage]);
-      updateUsage('message');
-
-      // Update session if provided
-      if (data.sessionId) {
-        setCurrentSessionId(data.sessionId);
-      }
-
+      // Clear input and files
+      setInput('');
+      setSelectedFiles([]);
+      setShowUpload(false);
     } catch (error) {
-      console.error('Error sending message:', error);
-      
-      // Add error message
-      const errorMessage: Message = {
-        id: generateId(),
-        content: 'Sorry, there was an error processing your message. Please try again.',
-        role: 'assistant',
-        timestamp: new Date(),
-      };
-
-      setMessages(prev => [...prev, errorMessage]);
-    } finally {
-      setIsLoading(false);
+      console.error('Failed to send message:', error);
     }
-  };
+  }, [input, selectedFiles, isLoading, sendMessage, authCurrentSessionId]);
 
-  // FIXED: Handle file selection with correct types
-  const handleFileSelect = (files: File[]) => {
+  // Handle file selection
+  const handleFilesChange = useCallback((files: File[]) => {
     setSelectedFiles(files);
-    setShowUpload(false);
-  };
+  }, []);
 
-  // FIXED: Handle remove file by index
-  const handleRemoveFile = (index: number) => {
-    setSelectedFiles(prev => prev.filter((_, i) => i !== index));
-  };
+  const handleFileRemove = useCallback((fileId: string) => {
+    // For MultimodalUpload compatibility
+    console.log('Removing file:', fileId);
+  }, []);
 
-  // Session management
-  const createNewSession = () => {
-    setCurrentSessionId(null);
-    setMessages([]);
-    setShowSidebar(false);
-  };
-
-  const handleSessionSelect = (sessionId: string) => {
-    setCurrentSessionId(sessionId);
-    // Load session messages here
-    setShowSidebar(false);
-  };
-
-  const handleSessionDelete = (sessionId: string) => {
-    setChatSessions(prev => prev.filter(s => s.id !== sessionId));
-    if (currentSessionId === sessionId) {
-      createNewSession();
-    }
-  };
-
-  // Handle navigation
-  const handleHomeClick = () => {
-    createNewSession();
-    setShowSidebar(false);
-  };
-
-  const handleSettingsClick = () => {
-    if (isAdmin) {
-      setShowSettings(true);
-    }
-  };
-
-  // ADDED: Handle trending topic selection
-  const handleTrendingTopicSelect = (prompt: string) => {
+  // Handle trending topic selection
+  const handleTrendingTopicSelect = useCallback((prompt: string) => {
     setInput(prompt);
-    // Auto-focus pada input setelah memilih topic
     setTimeout(() => {
       inputRef.current?.focus();
     }, 100);
-  };
+  }, []);
+
+  // Session management
+  const createNewSession = useCallback(() => {
+    clearMessages();
+    setAuthCurrentSessionId(null);
+    setShowSidebar(false);
+  }, [clearMessages]);
+
+  const handleSessionSelect = useCallback((sessionId: string) => {
+    // Set current session
+    setAuthCurrentSessionId(sessionId);
+    
+    // Load session messages - replace dengan actual API call
+    const selectedSession = authSessions.find((s: ChatSession) => s.id === sessionId);
+    if (selectedSession && selectedSession.messages) {
+      // Load messages from session
+      console.log('Loading session:', selectedSession);
+    }
+    
+    setShowSidebar(false);
+  }, [authSessions]);
+
+  const handleSessionDelete = useCallback((sessionId: string) => {
+    // Remove session from state
+    setAuthSessions((prev: ChatSession[]) => prev.filter((s: ChatSession) => s.id !== sessionId));
+    
+    // If current session deleted, create new one
+    if (authCurrentSessionId === sessionId) {
+      createNewSession();
+    }
+    
+    // API call to delete session
+    console.log('Deleting session:', sessionId);
+  }, [authCurrentSessionId, createNewSession]);
+
+  // Voice handlers
+  const handleVoiceToggle = useCallback(() => {
+    if (!support.speechRecognition) {
+      alert(`Voice input tidak didukung di ${support.browserName}. Gunakan Chrome atau Edge.`);
+      return;
+    }
+
+    if (isSpeaking) {
+      stopSpeaking();
+    }
+
+    if (isListening) {
+      stopListening();
+    } else {
+      setIsVoiceEnabled(true);
+      startListening();
+    }
+  }, [support, isSpeaking, isListening, stopSpeaking, stopListening, startListening]);
+
+  const handleVoiceTranscript = useCallback((transcript: string) => {
+    setInput(prev => prev + transcript + ' ');
+  }, []);
+
+  const handleFinalTranscript = useCallback((transcript: string) => {
+    if (transcript.trim()) {
+      setInput(transcript);
+    }
+  }, []);
+
+  // Memoized values
+  const showWelcome = useMemo(() => messages.length === 0, [messages.length]);
+
+  const filteredSessions = useMemo(() => {
+    if (!authSessions || authSessions.length === 0) return [];
+    return authSessions.filter((session: ChatSession) => 
+      session.title.toLowerCase().includes(searchQuery.toLowerCase())
+    );
+  }, [authSessions, searchQuery]);
 
   return (
     <div className="h-screen flex bg-background">
-      {/* Sidebar */}
-      <AnimatePresence>
-        {showSidebar && (
-          <motion.div
-            initial={{ x: -300, opacity: 0 }}
-            animate={{ x: 0, opacity: 1 }}
-            exit={{ x: -300, opacity: 0 }}
-            transition={{ duration: 0.3, ease: "easeInOut" }}
-            className="fixed left-0 top-0 h-full w-80 bg-card border-r z-50 lg:relative lg:translate-x-0"
-          >
-            <div className="flex flex-col h-full">
-              {/* Sidebar Header */}
-              <div className="flex items-center justify-between p-4 border-b">
-                <div className="flex items-center gap-2">
-                  <MessageSquare className="h-5 w-5" />
-                  <h2 className="font-semibold">Chat History</h2>
-                </div>
-                <div className="flex items-center gap-2">
-                  <Button
-                    variant="ghost"
-                    size="icon"
-                    onClick={createNewSession}
-                    title="New conversation"
-                  >
-                    <Plus className="h-4 w-4" />
-                  </Button>
-                  <Button
-                    variant="ghost"
-                    size="icon"
-                    onClick={() => setShowSidebar(false)}
-                    className="lg:hidden"
-                  >
-                    <X className="h-4 w-4" />
-                  </Button>
-                </div>
-              </div>
-
-              {/* Search */}
-              <div className="p-4 border-b">
-                <div className="relative">
-                  <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 h-4 w-4 text-muted-foreground" />
-                  <Input
-                    placeholder="Search conversations..."
-                    value={searchQuery}
-                    onChange={(e) => setSearchQuery(e.target.value)}
-                    className="pl-10"
-                  />
-                </div>
-              </div>
-
-              {/* Chat Sessions */}
-              {isAuthenticated ? (
-                <ChatHistory
-                  sessions={chatSessions}
-                  currentSessionId={currentSessionId}
-                  searchQuery={searchQuery}
-                  onSessionSelect={handleSessionSelect}
-                  onSessionDelete={handleSessionDelete}
-                  onNewSession={createNewSession}
-                />
-              ) : (
-                <div className="flex-1 flex items-center justify-center">
-                  <div className="text-center p-4">
-                    <LogIn className="w-8 h-8 mx-auto mb-3 text-muted-foreground/50" />
-                    <p className="text-sm text-muted-foreground mb-3">
-                      Login to save your conversations
-                    </p>
-                    <Button
-                      onClick={() => setShowLogin(true)}
-                      size="sm"
-                      className="w-full"
-                    >
-                      Login
-                    </Button>
-                  </div>
-                </div>
-              )}
-            </div>
-          </motion.div>
-        )}
-      </AnimatePresence>
+      {/* Fixed Chat Sidebar */}
+      <FixedChatSidebar
+        isOpen={showSidebar}
+        onClose={() => setShowSidebar(false)}
+        sessions={filteredSessions}
+        currentSessionId={authCurrentSessionId}
+        onSessionSelect={handleSessionSelect}
+        onSessionDelete={handleSessionDelete}
+        onNewSession={createNewSession}
+        isLoading={false}
+      />
 
       {/* Main Chat Area */}
       <div className="flex-1 flex flex-col min-w-0">
-        {/* Enhanced Navbar - UPDATED */}
+        {/* Enhanced Navbar */}
         <EnhancedNavbar
           user={user}
           isAuthenticated={isAuthenticated}
           isAdmin={isAdmin}
           notifications={0}
           onMenuToggle={() => setShowSidebar(!showSidebar)}
-          onHomeClick={handleHomeClick}
-          onSettingsClick={handleSettingsClick}
-          onLoginClick={() => setShowLogin(true)}
+          onHomeClick={createNewSession}
+          onSettingsClick={() => setShowSettings(true)}
+          onLoginClick={() => {/* Login logic */}}
           onLogoutClick={logout}
           onUploadClick={() => setShowUpload(true)}
-          onVoiceToggle={() => {/* Voice toggle logic */}}
-          onSpeechToggle={() => setSpeechEnabled(!speechEnabled)}
-          isVoiceActive={voiceRecognition.isListening}
-          isSpeechEnabled={speechEnabled}
+          onVoiceToggle={handleVoiceToggle}
+          onSpeechToggle={() => setAutoSpeak(!autoSpeak)}
+          isVoiceActive={isListening}
+          isSpeechEnabled={autoSpeak}
         />
 
         {/* Chat Messages Area */}
@@ -526,40 +514,92 @@ export function ChatBot() {
                   className="text-center py-12"
                 >
                   <Bot className="w-16 h-16 mx-auto mb-4 text-primary" />
-                  <h2 className="text-2xl font-bold mb-2">Welcome to AI Chatbot</h2>
-                  <p className="text-muted-foreground mb-2">
-                    Start a conversation by typing a message or uploading a file
+                  <h2 className="text-2xl font-bold mb-2">Welcome to AI Assistant</h2>
+                  <p className="text-muted-foreground mb-6">
+                    Start a conversation by typing a message, uploading a file, or using voice input
                   </p>
-                  
-                  {/* Quota Information */}
-                  <div className="mb-8">
-                    <Badge variant="secondary" className="text-xs">
-                      {userRole === 'admin' ? 
-                        'Unlimited messages' : 
-                        `${quotaUsed}/${quotaLimit} messages used today`
-                      }
+
+                  {/* Browser Support Info */}
+                  <div className="mb-6 flex justify-center gap-2">
+                    <Badge variant={support.speechRecognition ? "default" : "secondary"}>
+                      <Mic className="h-3 w-3 mr-1" />
+                      Voice: {support.speechRecognition ? 'Supported' : 'Not Available'}
+                    </Badge>
+                    <Badge variant="outline">
+                      Browser: {support.browserName}
                     </Badge>
                   </div>
 
-                  {/* ADDED: Trending Topics Cards */}
-                  <div className="mt-8">
-                    <TrendingCards 
-                      onTopicSelect={handleTrendingTopicSelect}
-                      maxCards={6}
-                      className="max-w-4xl mx-auto"
-                    />
-                  </div>
+                  {/* Trending Topics */}
+                  <TrendingCards 
+                    onTopicSelect={handleTrendingTopicSelect}
+                    maxCards={6}
+                    className="max-w-4xl mx-auto"
+                  />
                 </motion.div>
               )}
 
-              {/* Messages - FIXED: Remove onCopy prop as it's handled internally */}
-              {messages.map((message, index) => (
-                <ChatMessage
-                  key={message.id}
-                  message={message}
-                  index={index}
-                />
-              ))}
+              {/* Error Display */}
+              {chatError && (
+                <Alert variant="destructive">
+                  <AlertTriangle className="h-4 w-4" />
+                  <AlertDescription>{chatError}</AlertDescription>
+                </Alert>
+              )}
+
+              {/* Voice Error Display */}
+              {voiceError && (
+                <Alert variant="destructive">
+                  <Mic className="h-4 w-4" />
+                  <AlertDescription>{voiceError}</AlertDescription>
+                  <Button 
+                    variant="outline" 
+                    size="sm" 
+                    onClick={resetError}
+                    className="mt-2"
+                  >
+                    Dismiss
+                  </Button>
+                </Alert>
+              )}
+
+              {/* Messages with Continue Button */}
+              <AnimatePresence>
+                {messages.map((message, index) => (
+                  <MessageWithContinue
+                    key={message.id}
+                    message={message}
+                    isLastMessage={index === messages.length - 1}
+                    onContinue={continueMessage}
+                    onRetry={retryLastMessage}
+                    isLoading={isLoading}
+                  >
+                    <motion.div
+                      initial={{ opacity: 0, y: 20 }}
+                      animate={{ opacity: 1, y: 0 }}
+                      exit={{ opacity: 0, y: -20 }}
+                    >
+                      <ChatMessage
+                        message={message}
+                        index={index}
+                        showTimestamp={chatSettings.showTimestamps}
+                        compactMode={chatSettings.compactMode}
+                        isLastMessage={index === messages.length - 1}
+                      />
+                      
+                      {/* Speech Button for AI responses */}
+                      {message.role === 'assistant' && support.speechSynthesis && (
+                        <div className="flex justify-end mt-2">
+                          <SpeechButton
+                            text={message.content}
+                            className="h-6 w-6"
+                          />
+                        </div>
+                      )}
+                    </motion.div>
+                  </MessageWithContinue>
+                ))}
+              </AnimatePresence>
 
               {/* Loading indicator */}
               {isLoading && (
@@ -579,8 +619,31 @@ export function ChatBot() {
           </ScrollArea>
         </div>
 
+        {/* File Upload Area */}
+        <AnimatePresence>
+          {showUpload && (
+            <motion.div
+              initial={{ opacity: 0, height: 0 }}
+              animate={{ opacity: 1, height: 'auto' }}
+              exit={{ opacity: 0, height: 0 }}
+              className="border-t border-border bg-card/30 backdrop-blur-sm"
+            >
+              <div className="max-w-4xl mx-auto p-4">
+                <MultimodalUpload
+                  onFilesChange={handleFilesChange}
+                  onFileRemove={handleFileRemove}
+                  maxFiles={5}
+                  maxFileSize={50}
+                  showPreview={true}
+                  disabled={isLoading}
+                />
+              </div>
+            </motion.div>
+          )}
+        </AnimatePresence>
+
         {/* Input Area */}
-        <div className="border-t bg-background/95 backdrop-blur supports-[backdrop-filter]:bg-background/60">
+        <div className="border-t border-border bg-card/50 backdrop-blur-sm">
           <div className="max-w-4xl mx-auto p-4">
             {/* Selected Files Preview */}
             {selectedFiles.length > 0 && (
@@ -590,13 +653,20 @@ export function ChatBot() {
                     key={`${file.name}-${index}`}
                     className="flex items-center gap-2 bg-muted px-3 py-2 rounded-lg text-sm"
                   >
-                    <FileText className="h-4 w-4" />
+                    <div className="flex items-center gap-1">
+                      {file.type.startsWith('image/') && <Image className="h-4 w-4" />}
+                      {file.type.startsWith('audio/') && <Music className="h-4 w-4" />}
+                      {file.type.startsWith('video/') && <Video className="h-4 w-4" />}
+                      {!file.type.startsWith('image/') && !file.type.startsWith('audio/') && !file.type.startsWith('video/') && <File className="h-4 w-4" />}
+                    </div>
                     <span className="truncate max-w-32">{file.name}</span>
                     <Button
                       variant="ghost"
                       size="icon"
                       className="h-4 w-4 p-0"
-                      onClick={() => handleRemoveFile(index)}
+                      onClick={() => {
+                        setSelectedFiles(prev => prev.filter((_, i) => i !== index));
+                      }}
                     >
                       <X className="h-3 w-3" />
                     </Button>
@@ -607,28 +677,52 @@ export function ChatBot() {
 
             {/* Input Form */}
             <div className="flex items-end gap-2">
-              <div className="flex-1 relative">
+              {/* File Upload Button */}
+              <Button
+                variant="ghost"
+                size="icon"
+                onClick={() => setShowUpload(!showUpload)}
+                className="shrink-0"
+                title="Upload files"
+              >
+                <Paperclip className="h-4 w-4" />
+              </Button>
+
+              {/* Voice Input */}
+              {support.speechRecognition && (
+                <VoiceInput
+                  onTranscriptChange={handleVoiceTranscript}
+                  onFinalTranscript={handleFinalTranscript}
+                  isEnabled={isVoiceEnabled}
+                  language="id-ID"
+                />
+              )}
+
+              {/* Text Input */}
+              <div className="flex-1">
                 <Textarea
                   ref={inputRef}
                   value={input}
                   onChange={handleInputChange}
                   onKeyDown={handleKeyPress}
                   placeholder={
-                    !canSendMessage() 
-                      ? "You've reached your daily message limit" 
-                      : "Type your message here..."
+                    isListening 
+                      ? "Listening... or type your message"
+                      : support.speechRecognition && isVoiceEnabled
+                        ? "Type your message or use voice input..."
+                        : "Type your message..."
                   }
-                  disabled={isLoading || !canSendMessage()}
-                  className="min-h-12 max-h-32 resize-none pr-12"
-                  rows={1}
+                  className="min-h-[60px] max-h-[120px] resize-none"
+                  disabled={isLoading}
                 />
               </div>
 
+              {/* Send Button */}
               <Button
                 onClick={handleSendMessage}
-                disabled={(!input.trim() && selectedFiles.length === 0) || isLoading || !canSendMessage()}
+                disabled={(!input.trim() && selectedFiles.length === 0) || isLoading}
                 size="icon"
-                className="h-12 w-12 shrink-0"
+                className="shrink-0 h-[60px] w-12"
               >
                 {isLoading ? (
                   <Loader2 className="h-4 w-4 animate-spin" />
@@ -640,13 +734,20 @@ export function ChatBot() {
 
             {/* Footer Info */}
             <div className="mt-2 flex items-center justify-between text-xs text-muted-foreground">
-              <span>Press Enter to send, Shift+Enter for new line</span>
               <div className="flex items-center gap-4">
-                <span>
-                  {userRole === 'admin' ? 'Unlimited' : `${quotaUsed}/${quotaLimit} messages`}
-                </span>
-                {currentSessionId && (
-                  <span>Session: {currentSessionId.slice(0, 8)}...</span>
+                <span>Press Enter to send, Shift+Enter for new line</span>
+                {support.speechRecognition && (
+                  <span>Voice input available</span>
+                )}
+              </div>
+              <div className="flex items-center gap-2">
+                {confidence > 0 && isListening && (
+                  <Badge variant="outline" className="text-xs">
+                    Accuracy: {Math.round(confidence * 100)}%
+                  </Badge>
+                )}
+                {authCurrentSessionId && (
+                  <span>Session: {authCurrentSessionId.slice(0, 8)}...</span>
                 )}
               </div>
             </div>
@@ -654,69 +755,13 @@ export function ChatBot() {
         </div>
       </div>
 
-      {/* File Upload Modal - FIXED: Correct prop types */}
-      <AnimatePresence>
-        {showUpload && (
-          <motion.div
-            initial={{ opacity: 0 }}
-            animate={{ opacity: 1 }}
-            exit={{ opacity: 0 }}
-            className="fixed inset-0 bg-background/80 backdrop-blur-sm z-50 flex items-center justify-center p-4"
-          >
-            <motion.div
-              initial={{ scale: 0.95, opacity: 0 }}
-              animate={{ scale: 1, opacity: 1 }}
-              exit={{ scale: 0.95, opacity: 0 }}
-              className="bg-card rounded-lg border p-6 w-full max-w-md"
-            >
-              <FileUpload
-                onFilesSelected={handleFileSelect}
-                selectedFiles={selectedFiles}
-                onRemoveFile={handleRemoveFile}
-                onCancel={() => setShowUpload(false)}
-                maxFiles={5}
-                maxSize={10 * 1024 * 1024}
-                acceptedTypes={[
-                  'image/*',
-                  'application/pdf',
-                  'text/*',
-                  '.doc',
-                  '.docx',
-                  '.txt',
-                  '.md'
-                ]}
-              />
-            </motion.div>
-          </motion.div>
-        )}
-      </AnimatePresence>
-
-      {/* Settings Modal - Admin Only */}
-      {showSettings && isAdmin && (
-        <SettingsDialog
-          isOpen={showSettings}
-          onClose={() => setShowSettings(false)}
-        />
-      )}
-
-      {/* Login Modal */}
-      {showLogin && (
-        <LoginDialog
-          isOpen={showLogin}
-          onClose={() => setShowLogin(false)}
-        />
-      )}
-
-      {/* Overlay for mobile sidebar */}
-      {showSidebar && (
-        <div
-          className="fixed inset-0 bg-background/80 backdrop-blur-sm z-40 lg:hidden"
-          onClick={() => setShowSidebar(false)}
-        />
-      )}
+      {/* Settings Dialog */}
+      <CompactSettingsDialog
+        isOpen={showSettings}
+        onClose={() => setShowSettings(false)}
+      />
     </div>
   );
 }
 
-// FIXED: Add default export
 export default ChatBot;
