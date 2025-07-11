@@ -1,6 +1,6 @@
 'use client';
 
-import React, { forwardRef } from 'react';
+import React, { forwardRef, useEffect } from 'react';
 import { motion } from 'framer-motion';
 import { Send, Loader2, Type, Hash } from 'lucide-react';
 import { Button } from './ui/button';
@@ -60,6 +60,7 @@ export const EnhancedTextarea = forwardRef<HTMLTextAreaElement, EnhancedTextarea
     } = useEnhancedInput({
       onSend: (message) => {
         onSend?.(message);
+        // FIXED: Always clear after sending, regardless of external control
         clear();
       },
       maxLength,
@@ -72,12 +73,16 @@ export const EnhancedTextarea = forwardRef<HTMLTextAreaElement, EnhancedTextarea
     // Use external value if provided (controlled component)
     const displayValue = externalValue !== undefined ? externalValue : value;
 
-    // Handle external value changes
-    React.useEffect(() => {
-      if (externalValue !== undefined && externalValue !== value) {
+    // FIXED: Handle external value changes and reset
+    useEffect(() => {
+      if (externalValue !== undefined) {
         setValue(externalValue);
+        // If external value is empty, ensure internal state is also cleared
+        if (externalValue === '') {
+          clear();
+        }
       }
-    }, [externalValue, value, setValue]);
+    }, [externalValue, setValue, clear]);
 
     // Handle external onChange
     const handleValueChange = (e: React.ChangeEvent<HTMLTextAreaElement>) => {
@@ -89,11 +94,18 @@ export const EnhancedTextarea = forwardRef<HTMLTextAreaElement, EnhancedTextarea
     const isNearLimit = characterCount > maxLength * 0.8;
     const isOverLimit = characterCount > maxLength;
 
+    // FIXED: Handle send with proper clearing
     const handleSendClick = () => {
       if (canSend) {
-        onSend?.(displayValue.trim());
+        const messageToSend = displayValue.trim();
+        onSend?.(messageToSend);
+        // FIXED: Force clear the input immediately
         if (externalValue === undefined) {
           clear();
+        }
+        // If controlled by external value, signal parent to clear
+        if (onChange) {
+          onChange('');
         }
       }
     };

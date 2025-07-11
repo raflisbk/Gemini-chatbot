@@ -44,15 +44,20 @@ export function ContinueButton({
       lastMessage.endsWith('..'),
       lastMessage.endsWith(' -'),
       lastMessage.length > 1000 && !lastMessage.endsWith('.'),
-      lastMessage.includes('['),
-      lastMessage.includes('Lanjut'),
-      lastMessage.includes('continue'),
-      /\b(akan|sedang|kemudian|selanjutnya|berikutnya)\s*$/i.test(lastMessage)
+      lastMessage.length > 1000 && !lastMessage.endsWith('!'),
+      lastMessage.length > 1000 && !lastMessage.endsWith('?'),
+      /\b(akan|sedang|kemudian|selanjutnya|berikutnya|namun|tetapi|dan|atau)\s*$/i.test(lastMessage),
+      lastMessage.includes('[melanjutkan]'),
+      lastMessage.includes('[continue]'),
+      lastMessage.includes('...'),
+      // Check if message ends abruptly without proper conclusion
+      !lastMessage.match(/[.!?]\s*$/) && lastMessage.length > 500
     ];
-    
-    return indicators.some(Boolean);
+
+    return indicators.some(indicator => indicator);
   }, [lastMessage]);
 
+  // Show hint after component mounts if message is incomplete
   useEffect(() => {
     if (isIncomplete && canContinue) {
       const timer = setTimeout(() => setShowHint(true), 2000);
@@ -60,80 +65,85 @@ export function ContinueButton({
     }
   }, [isIncomplete, canContinue]);
 
+  // FIXED: Handle continue action
   const handleContinue = async () => {
+    if (isContinuing || isLoading) return;
+
     setIsContinuing(true);
     try {
       await onContinue();
     } catch (error) {
-      console.error('Failed to continue:', error);
+      console.error('Continue failed:', error);
     } finally {
       setIsContinuing(false);
     }
   };
 
+  // FIXED: Handle retry action
   const handleRetry = async () => {
-    if (!onRetry) return;
-    
+    if (isRetrying || isLoading || !onRetry) return;
+
     setIsRetrying(true);
     try {
       await onRetry();
     } catch (error) {
-      console.error('Failed to retry:', error);
+      console.error('Retry failed:', error);
     } finally {
       setIsRetrying(false);
     }
   };
 
+  // Copy message to clipboard
   const handleCopy = async () => {
     try {
       await navigator.clipboard.writeText(lastMessage);
       setCopied(true);
       setTimeout(() => setCopied(false), 2000);
     } catch (error) {
-      console.error('Failed to copy:', error);
+      console.error('Copy failed:', error);
     }
   };
 
-  if (!canContinue && !isIncomplete) {
-    return null;
-  }
+  // Don't show if conditions aren't met
+  if (!canContinue && !isIncomplete) return null;
 
   return (
     <TooltipProvider>
       <motion.div
         initial={{ opacity: 0, y: 10 }}
         animate={{ opacity: 1, y: 0 }}
-        exit={{ opacity: 0, y: 10 }}
+        exit={{ opacity: 0, y: -10 }}
         className={`relative ${className}`}
       >
-        {/* Main Continue Button */}
-        <Card className="border-primary/20 bg-gradient-to-r from-primary/5 to-primary/10">
-          <CardContent className="p-4">
-            <div className="flex items-center justify-between">
-              <div className="flex items-center gap-3">
-                <div className="flex items-center gap-2">
-                  <div className="w-2 h-2 bg-primary rounded-full animate-pulse" />
-                  <span className="text-sm font-medium">
-                    {isIncomplete ? 'Respons terputus' : 'Respons siap dilanjutkan'}
+        <Card className="border-dashed border-primary/30 bg-primary/5 hover:bg-primary/10 transition-colors">
+          <CardContent className="p-3">
+            <div className="flex items-center justify-between gap-3">
+              {/* Status Indicator */}
+              <div className="flex items-center gap-2">
+                <div className="flex items-center gap-1">
+                  <MoreHorizontal className="h-3 w-3 text-primary animate-pulse" />
+                  <span className="text-xs text-muted-foreground font-medium">
+                    {isIncomplete ? 'Response seems incomplete' : 'Ready to continue'}
                   </span>
                 </div>
-                
                 {isIncomplete && (
-                  <Badge variant="secondary" className="text-xs">
-                    Tidak lengkap
+                  <Badge variant="outline" className="h-5 text-xs">
+                    Incomplete
                   </Badge>
                 )}
               </div>
 
-              <div className="flex items-center gap-2">
+              {/* Action Buttons */}
+              <div className="flex items-center gap-1">
                 {/* Copy Button */}
                 <Tooltip>
                   <TooltipTrigger asChild>
                     <Button
                       variant="ghost"
-                      size="icon"
+                      size="sm"
                       onClick={handleCopy}
-                      className="h-8 w-8"
+                      className="h-7 w-7 p-0"
+                      disabled={!lastMessage}
                     >
                       {copied ? (
                         <Check className="h-3 w-3 text-green-500" />
@@ -143,7 +153,7 @@ export function ContinueButton({
                     </Button>
                   </TooltipTrigger>
                   <TooltipContent>
-                    {copied ? 'Disalin!' : 'Salin respons'}
+                    {copied ? 'Copied!' : 'Copy message'}
                   </TooltipContent>
                 </Tooltip>
 
@@ -153,10 +163,10 @@ export function ContinueButton({
                     <TooltipTrigger asChild>
                       <Button
                         variant="ghost"
-                        size="icon"
+                        size="sm"
                         onClick={handleRetry}
                         disabled={isRetrying || isLoading}
-                        className="h-8 w-8"
+                        className="h-7 w-7 p-0"
                       >
                         {isRetrying ? (
                           <Loader2 className="h-3 w-3 animate-spin" />
@@ -166,57 +176,58 @@ export function ContinueButton({
                       </Button>
                     </TooltipTrigger>
                     <TooltipContent>
-                      Coba lagi
+                      Retry generation
                     </TooltipContent>
                   </Tooltip>
                 )}
 
-                {/* Continue Button */}
-                <Button
-                  onClick={handleContinue}
-                  disabled={isContinuing || isLoading}
-                  size="sm"
-                  className="gap-2"
-                >
-                  {isContinuing ? (
-                    <>
-                      <Loader2 className="h-3 w-3 animate-spin" />
-                      Melanjutkan...
-                    </>
-                  ) : (
-                    <>
-                      Lanjutkan
-                      <ArrowRight className="h-3 w-3" />
-                    </>
-                  )}
-                </Button>
+                {/* FIXED: Continue Button */}
+                <Tooltip>
+                  <TooltipTrigger asChild>
+                    <Button
+                      variant="default"
+                      size="sm"
+                      onClick={handleContinue}
+                      disabled={isContinuing || isLoading}
+                      className="h-7 px-3 bg-primary hover:bg-primary/90"
+                    >
+                      {isContinuing ? (
+                        <>
+                          <Loader2 className="h-3 w-3 mr-1 animate-spin" />
+                          <span className="text-xs">Continuing...</span>
+                        </>
+                      ) : (
+                        <>
+                          <span className="text-xs font-medium">Continue</span>
+                          <ArrowRight className="h-3 w-3 ml-1" />
+                        </>
+                      )}
+                    </Button>
+                  </TooltipTrigger>
+                  <TooltipContent>
+                    Continue the response
+                  </TooltipContent>
+                </Tooltip>
               </div>
             </div>
-
-            {/* Progress Indicator */}
-            {(isContinuing || isLoading) && (
-              <motion.div
-                initial={{ width: 0 }}
-                animate={{ width: '100%' }}
-                transition={{ duration: 3, ease: 'easeInOut' }}
-                className="mt-3 h-1 bg-primary rounded-full"
-              />
-            )}
           </CardContent>
         </Card>
 
-        {/* Hint Animation */}
+        {/* Hint Tooltip */}
         <AnimatePresence>
-          {showHint && !isContinuing && (
+          {showHint && (
             <motion.div
-              initial={{ opacity: 0, scale: 0.8 }}
+              initial={{ opacity: 0, scale: 0.9 }}
               animate={{ opacity: 1, scale: 1 }}
-              exit={{ opacity: 0, scale: 0.8 }}
-              className="absolute -top-12 left-1/2 transform -translate-x-1/2"
+              exit={{ opacity: 0, scale: 0.9 }}
+              className="absolute top-full left-1/2 transform -translate-x-1/2 mt-2 z-10"
+              onAnimationComplete={() => {
+                setTimeout(() => setShowHint(false), 3000);
+              }}
             >
               <div className="bg-popover border rounded-lg shadow-lg p-2 text-xs text-muted-foreground whitespace-nowrap">
-                Klik "Lanjutkan" untuk melengkapi respons
-                <div className="absolute top-full left-1/2 transform -translate-x-1/2 w-0 h-0 border-l-4 border-r-4 border-t-4 border-transparent border-t-border" />
+                Klik "Continue" untuk melengkapi respons
+                <div className="absolute top-0 left-1/2 transform -translate-x-1/2 -translate-y-full w-0 h-0 border-l-4 border-r-4 border-b-4 border-transparent border-b-border" />
               </div>
             </motion.div>
           )}
@@ -253,8 +264,8 @@ export function ContinueButton({
   );
 }
 
-// Hook untuk mendeteksi apakah pesan perlu dilanjutkan
-export function useMessageContinuation(message: string, threshold: number = 1000) {
+// FIXED: Hook untuk mendeteksi apakah pesan perlu dilanjutkan
+export function useMessageContinuation(message: string, threshold: number = 800) {
   const [canContinue, setCanContinue] = useState(false);
 
   useEffect(() => {
@@ -263,13 +274,20 @@ export function useMessageContinuation(message: string, threshold: number = 1000
       return;
     }
 
+    // Enhanced continuation detection
     const shouldContinue = 
       message.length >= threshold ||
       message.endsWith('...') ||
       message.endsWith('..') ||
-      /\b(akan|sedang|kemudian|selanjutnya|berikutnya)\s*$/i.test(message) ||
+      message.endsWith(' -') ||
+      /\b(akan|sedang|kemudian|selanjutnya|berikutnya|namun|tetapi|dan|atau)\s*$/i.test(message) ||
       message.includes('[melanjutkan]') ||
-      message.includes('[continue]');
+      message.includes('[continue]') ||
+      message.includes('...') ||
+      // Check if message doesn't end with proper punctuation and is long enough
+      (!message.match(/[.!?]\s*$/) && message.length > 500) ||
+      // Check if message ends with incomplete sentence structures
+      /\b(yang|untuk|dengan|dalam|pada|dari|ke|di|oleh|tentang|karena|jika|ketika)\s*$/i.test(message);
 
     setCanContinue(shouldContinue);
   }, [message, threshold]);
@@ -277,7 +295,7 @@ export function useMessageContinuation(message: string, threshold: number = 1000
   return canContinue;
 }
 
-// Komponen wrapper untuk ChatMessage
+// FIXED: Komponen wrapper untuk ChatMessage
 interface MessageWithContinueProps {
   message: {
     id: string;
@@ -301,11 +319,14 @@ export function MessageWithContinue({
   children
 }: MessageWithContinueProps) {
   const canContinue = useMessageContinuation(message.content);
+  
+  // FIXED: Only show continue button for assistant messages that are last and seem incomplete
   const showContinueButton = 
     isLastMessage && 
     message.role === 'assistant' && 
-    canContinue && 
-    onContinue;
+    (canContinue || message.content.length > 800) && 
+    onContinue &&
+    !isLoading;
 
   return (
     <div className="space-y-3">

@@ -1,17 +1,19 @@
-// src/components/index.ts - Updated component exports
+// src/components/index.ts - Updated component exports with FIXED imports
 
 // Main Chat Components
 export { ChatBot } from './ChatBot';
 export { ChatMessage } from './ChatMessage';
 export { LoadingDots } from './LoadingDots';
 
-// Enhanced Components (New)
+// Enhanced Components
 export { CompactSettingsDialog } from './SettingsDialog';
 export { 
   VoiceInput, 
   SpeechButton 
 } from './VoiceInput';
-export { FixedChatSidebar } from './ChatSidebar';
+
+// FIXED: Export FixedChatSidebar properly
+export { default as FixedChatSidebar } from './ChatSidebar';
 
 // FIXED: Use default export/import for MultimodalUpload
 export { default as MultimodalUpload } from './MultimodalUpload';
@@ -25,11 +27,18 @@ export {
 // Layout Components
 export { EnhancedNavbar } from './EnhancedNavbar';
 export { TrendingCards } from './TrendingCards';
-export { Logo } from './Logo';
+
+// FIXED: Logo with both default and named exports
+export { default as Logo } from './Logo'; // Default export
+export { Logo as LogoComponent } from './Logo'; // Named export (alternative)
+
 export { ThemeToggle } from './ThemeToggle';
 
+// Enhanced Components (New)
+export { default as EnhancedTextarea } from './EnhancedTextarea';
+export { default as SmartFileUpload } from './FileUpload';
+
 // Legacy Components (if still needed)
-export { SmartFileUpload } from './FileUpload';
 export { LoginDialog } from './LoginDialog';
 
 // UI Components Re-exports

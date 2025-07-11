@@ -55,18 +55,18 @@ import { Card, CardContent } from './ui/card';
 // Enhanced Components
 import { ChatMessage } from './ChatMessage';
 import { LoadingDots } from './LoadingDots';
-import { Logo } from './Logo';
+import Logo from './Logo'; // FIXED: Default import
 import { ThemeToggle } from './ThemeToggle';
 import { CompactSettingsDialog } from './SettingsDialog';
 import { VoiceInput, SpeechButton } from './VoiceInput';
-import FixedChatSidebar from './ChatSidebar'; // Updated import
+import FixedChatSidebar from './ChatSidebar';
 import MultimodalUpload from './MultimodalUpload';
 import { MessageWithContinue } from './ContinueButton';
 import { TrendingCards } from './TrendingCards';
 import { EnhancedNavbar } from './EnhancedNavbar';
 import { LoginDialog } from './LoginDialog';
-import EnhancedTextarea from './EnhancedTextarea'; // New import
-import SmartFileUpload from './FileUpload'; // New import
+import EnhancedTextarea from './EnhancedTextarea';
+import SmartFileUpload from './FileUpload';
 
 // Context and Utilities
 import { useAuth } from '@/context/AuthContext';
@@ -126,255 +126,126 @@ interface FileItem {
   error?: string;
 }
 
-// Browser Support Hook
-const useBrowserSupport = (): BrowserSupport => {
-  const [support, setSupport] = useState<BrowserSupport>({
+const getBrowserSupport = (): BrowserSupport => {
+  const isClient = typeof window !== 'undefined';
+  if (!isClient) return {
     speechRecognition: false,
     speechSynthesis: false,
     microphone: false,
-    browserName: 'Unknown',
+    browserName: 'Server',
     isSupported: false
-  });
+  };
 
-  useEffect(() => {
-    const checkSupport = async () => {
-      try {
-        // Browser detection
-        const userAgent = navigator.userAgent;
-        let browserName = 'Unknown';
-        
-        if (userAgent.includes('Edg')) browserName = 'Edge';
-        else if (userAgent.includes('Chrome')) browserName = 'Chrome';
-        else if (userAgent.includes('Firefox')) browserName = 'Firefox';
-        else if (userAgent.includes('Safari') && !userAgent.includes('Chrome')) browserName = 'Safari';
+  const userAgent = navigator.userAgent;
+  let browserName = 'Unknown';
+  
+  if (userAgent.indexOf('Chrome') > -1) browserName = 'Chrome';
+  else if (userAgent.indexOf('Firefox') > -1) browserName = 'Firefox';
+  else if (userAgent.indexOf('Safari') > -1) browserName = 'Safari';
+  else if (userAgent.indexOf('Edge') > -1) browserName = 'Edge';
 
-        // Check Speech Recognition
-        const SpeechRecognition = (window as any).SpeechRecognition || (window as any).webkitSpeechRecognition;
-        const speechRecognition = !!SpeechRecognition;
-
-        // Check Speech Synthesis
-        const speechSynthesis = 'speechSynthesis' in window;
-
-        // Check Microphone Access
-        let microphone = false;
-        try {
-          if (navigator.mediaDevices && navigator.mediaDevices.getUserMedia) {
-            const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
-            microphone = true;
-            stream.getTracks().forEach(track => track.stop());
-          }
-        } catch (error) {
-          microphone = false;
-        }
-
-        const isSupported = speechRecognition && speechSynthesis;
-
-        setSupport({
-          speechRecognition,
-          speechSynthesis,
-          microphone,
-          browserName,
-          isSupported
-        });
-      } catch (error) {
-        console.error('Browser support check failed:', error);
-      }
-    };
-
-    checkSupport();
-  }, []);
-
-  return support;
+  return {
+    speechRecognition: 'webkitSpeechRecognition' in window || 'SpeechRecognition' in window,
+    speechSynthesis: 'speechSynthesis' in window,
+    microphone: 'mediaDevices' in navigator && 'getUserMedia' in navigator.mediaDevices,
+    browserName,
+    isSupported: true
+  };
 };
 
-export function ChatBot() {
-  const { 
-    user, 
-    isAuthenticated, 
-    isAdmin, 
-    logout,
-    modelSettings,
+export const ChatBot: React.FC = () => {
+  // State hooks
+  const [input, setInput] = useState('');
+  const [fileItems, setFileItems] = useState<FileItem[]>([]);
+  const [showSidebar, setShowSidebar] = useState(false);
+  const [showSettings, setShowSettings] = useState(false);
+  const [showLogin, setShowLogin] = useState(false);
+  const [isVoiceEnabled, setIsVoiceEnabled] = useState(true);
+  const [autoSpeak, setAutoSpeak] = useState(false);
+
+  // FIXED: Mock sessions state (replace with real data)
+  const [sessions, setSessions] = useState<ChatSession[]>([]);
+  const [currentSessionId, setCurrentSessionId] = useState<string | null>(null);
+
+  // Refs
+  const messagesEndRef = useRef<HTMLDivElement>(null);
+  const fileInputRef = useRef<HTMLInputElement>(null);
+
+  // Context hooks - FIXED: Only use available properties
+  const {
+    user,
+    isGuest,
     chatSettings,
-    voiceSettings
+    modelSettings,
+    appearanceSettings,
+    voiceSettings,
+    privacySettings
   } = useAuth();
 
-  // Local state untuk sessions management
-  const [authSessions, setAuthSessions] = useState<ChatSession[]>([]);
-  const [authCurrentSessionId, setAuthCurrentSessionId] = useState<string | null>(null);
-
-  // Chat Hook
+  // Chat hook
   const {
     messages,
     isLoading,
     error: chatError,
     sendMessage,
+    clearMessages,
     continueMessage,
-    retryLastMessage,
-    canContinue,
-    clearMessages
+    retryLastMessage
   } = useChat();
 
-  // Browser Support
-  const support = useBrowserSupport();
-
-  // Voice Input
+  // Voice hooks
   const {
-    isSupported: voiceSupported,
     isListening,
-    isProcessing,
     transcript,
-    interimTranscript,
-    confidence,
-    error: voiceError,
     startListening,
     stopListening,
-    toggleListening,
-    clearTranscript,
+    error: voiceError,
     resetError
   } = useVoiceInput({
     language: 'id-ID',
-    continuous: false,
+    continuous: true,
     interimResults: true
   });
 
-  // Text to Speech
-  const {
-    isSpeaking,
-    speak,
-    stop: stopSpeaking
-  } = useTextToSpeech();
-
-  // State management
-  const [input, setInput] = useState('');
-  const [showSidebar, setShowSidebar] = useState(false);
-  const [showSettings, setShowSettings] = useState(false);
-  const [showLogin, setShowLogin] = useState(false);
-  const [fileItems, setFileItems] = useState<FileItem[]>([]); // FIXED: Use FileItem type
-  const [searchQuery, setSearchQuery] = useState('');
-  const [isVoiceEnabled, setIsVoiceEnabled] = useState(false);
-  const [autoSpeak, setAutoSpeak] = useState(false);
-
-  // Refs
-  const messagesEndRef = useRef<HTMLDivElement>(null);
+  // Browser support detection
+  const support = useMemo(() => getBrowserSupport(), []);
+  
+  // Show states
+  const showWelcome = messages.length === 0 && !isLoading;
 
   // Auto-scroll to bottom
-  const scrollToBottom = useCallback(() => {
+  useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
-  }, []);
+  }, [messages, isLoading]);
 
-  useEffect(() => {
-    scrollToBottom();
-  }, [messages, scrollToBottom]);
-
-  // Handle voice transcript
-  useEffect(() => {
-    if (transcript && transcript.trim()) {
-      setInput(transcript);
-      clearTranscript();
-    }
-  }, [transcript, clearTranscript]);
-
-  // Handle interim transcript display
-  useEffect(() => {
-    if (interimTranscript && isListening) {
-      setInput(prev => prev + interimTranscript);
-    }
-  }, [interimTranscript, isListening]);
-
-  // Auto-speak AI responses
-  useEffect(() => {
-    if (autoSpeak && messages.length > 0) {
-      const lastMessage = messages[messages.length - 1];
-      if (lastMessage.role === 'assistant' && !isSpeaking) {
-        speak(lastMessage.content);
-      }
-    }
-  }, [messages, autoSpeak, isSpeaking, speak]);
-
-  // Load sessions untuk user yang authenticated
-  useEffect(() => {
-    if (isAuthenticated && user?.id) {
-      // Simulasi load sessions - replace dengan actual API call
-      const loadSessions = async () => {
-        try {
-          // Temporary mock data - replace dengan actual API
-          const mockSessions: ChatSession[] = [
-            {
-              id: 'session-1',
-              user_id: user.id,
-              title: 'Welcome Conversation',
-              message_count: 5,
-              last_message_at: new Date().toISOString(),
-              is_active: true,
-              created_at: new Date().toISOString(),
-              updated_at: new Date().toISOString(),
-              context_summary: 'Initial conversation about AI features'
-            }
-          ];
-          setAuthSessions(mockSessions);
-        } catch (error) {
-          console.error('Failed to load sessions:', error);
-        }
-      };
-      
-      loadSessions();
-    } else {
-      setAuthSessions([]);
-      setAuthCurrentSessionId(null);
-    }
-  }, [isAuthenticated, user?.id]);
-
-  // FIXED: File handling functions
-  const getFileType = (file: File): FileItem['type'] => {
-    if (file.type.startsWith('image/')) return 'image';
-    if (file.type.startsWith('video/')) return 'video';
-    if (file.type.startsWith('audio/')) return 'audio';
-    return 'document';
-  };
-
-  const handleFileAdd = useCallback((newFiles: File[]) => {
-    const newFileItems: FileItem[] = newFiles.map(file => ({
-      id: `file-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`,
+  // File handling
+  const handleFileAdd = useCallback((files: FileList | File[]) => {
+    const fileArray = Array.from(files);
+    const newFileItems: FileItem[] = fileArray.map(file => ({
+      id: generateId(),
       file,
-      url: URL.createObjectURL(file),
-      type: getFileType(file),
+      type: file.type.startsWith('image/') ? 'image' : 
+            file.type.startsWith('video/') ? 'video' :
+            file.type.startsWith('audio/') ? 'audio' : 'document',
       progress: 0,
-      status: 'pending' as const
+      status: 'pending'
     }));
 
     setFileItems(prev => [...prev, ...newFileItems]);
 
     // Simulate upload progress
-    newFileItems.forEach(fileItem => {
-      simulateUpload(fileItem.id);
+    newFileItems.forEach(item => {
+      const interval = setInterval(() => {
+        setFileItems(prev => 
+          prev.map(f => 
+            f.id === item.id && f.progress < 100
+              ? { ...f, progress: f.progress + 10, status: f.progress >= 90 ? 'completed' : 'uploading' }
+              : f
+          )
+        );
+      }, 100);
     });
   }, []);
-
-  const simulateUpload = (fileId: string) => {
-    let progress = 0;
-    const interval = setInterval(() => {
-      progress += Math.random() * 30;
-      if (progress >= 100) {
-        progress = 100;
-        setFileItems(prev => 
-          prev.map(f => 
-            f.id === fileId 
-              ? { ...f, progress: 100, status: 'completed' }
-              : f
-          )
-        );
-        clearInterval(interval);
-      } else {
-        setFileItems(prev => 
-          prev.map(f => 
-            f.id === fileId 
-              ? { ...f, progress, status: 'uploading' }
-              : f
-          )
-        );
-      }
-    }, 100);
-  };
 
   const handleFileRemove = useCallback((fileId: string) => {
     setFileItems(prev => {
@@ -386,29 +257,36 @@ export function ChatBot() {
     });
   }, []);
 
-  // Send message
+  // FIXED: Send message with proper error handling
   const handleSendMessage = useCallback(async (message?: string) => {
     const messageToSend = message || input;
     if (!messageToSend.trim() && fileItems.length === 0) return;
     if (isLoading) return;
 
+    // Store items for potential restoration
+    const currentFileItems = [...fileItems];
+    
     try {
       const files = fileItems
         .filter(item => item.status === 'completed')
         .map(item => item.file);
 
+      // Clear input immediately before sending
+      setInput('');
+      setFileItems([]);
+
       await sendMessage(messageToSend.trim(), {
         files,
-        sessionId: authCurrentSessionId || undefined
+        sessionId: currentSessionId || undefined
       });
 
-      // Clear input and files
-      if (!message) setInput(''); // Only clear if not called programmatically
-      setFileItems([]);
     } catch (error) {
+      // FIXED: Restore state if send fails
+      setInput(messageToSend);
+      setFileItems(currentFileItems);
       console.error('Failed to send message:', error);
     }
-  }, [input, fileItems, isLoading, sendMessage, authCurrentSessionId]);
+  }, [input, fileItems, isLoading, sendMessage, currentSessionId]);
 
   // Handle trending topic selection
   const handleTrendingTopicSelect = useCallback((prompt: string) => {
@@ -418,116 +296,89 @@ export function ChatBot() {
   // Session management
   const createNewSession = useCallback(() => {
     clearMessages();
-    setAuthCurrentSessionId(null);
+    setCurrentSessionId(null);
     setShowSidebar(false);
   }, [clearMessages]);
 
   const handleSessionSelect = useCallback((sessionId: string) => {
-    // Set current session
-    setAuthCurrentSessionId(sessionId);
-    
-    // Load session messages - replace dengan actual API call
-    const selectedSession = authSessions.find((s: ChatSession) => s.id === sessionId);
+    setCurrentSessionId(sessionId);
+    const selectedSession = sessions.find((s: ChatSession) => s.id === sessionId);
     if (selectedSession && selectedSession.messages) {
-      // Load messages from session
       console.log('Loading session:', selectedSession);
     }
-    
     setShowSidebar(false);
-  }, [authSessions]);
+  }, [sessions]);
 
   const handleSessionDelete = useCallback((sessionId: string) => {
-    // Remove session from state
-    setAuthSessions((prev: ChatSession[]) => prev.filter((s: ChatSession) => s.id !== sessionId));
-    
-    // If current session deleted, create new one
-    if (authCurrentSessionId === sessionId) {
+    setSessions((prev: ChatSession[]) => prev.filter((s: ChatSession) => s.id !== sessionId));
+    if (currentSessionId === sessionId) {
       createNewSession();
     }
-    
-    // API call to delete session
     console.log('Deleting session:', sessionId);
-  }, [authCurrentSessionId, createNewSession]);
+  }, [currentSessionId, createNewSession]);
 
   // Voice handlers
   const handleVoiceToggle = useCallback(() => {
     if (!support.speechRecognition) {
-      alert(`Voice input tidak didukung di ${support.browserName}. Gunakan Chrome atau Edge.`);
+      alert(`Voice input tidak didukung di ${support.browserName}.`);
       return;
     }
-
-    if (isSpeaking) {
-      stopSpeaking();
-    }
-
+    
     if (isListening) {
       stopListening();
     } else {
-      setIsVoiceEnabled(true);
       startListening();
     }
-  }, [support, isSpeaking, isListening, stopSpeaking, stopListening, startListening]);
+  }, [support.speechRecognition, isListening, startListening, stopListening, support.browserName]);
 
-  const handleVoiceTranscript = useCallback((transcript: string) => {
-    setInput(prev => prev + transcript + ' ');
+  const handleVoiceTranscript = useCallback((newTranscript: string) => {
+    setInput(prev => prev + newTranscript);
   }, []);
 
-  const handleFinalTranscript = useCallback((transcript: string) => {
-    if (transcript.trim()) {
-      setInput(transcript);
+  const handleFinalTranscript = useCallback((finalTranscript: string) => {
+    if (finalTranscript.trim()) {
+      handleSendMessage(finalTranscript.trim());
     }
-  }, []);
+  }, [handleSendMessage]);
 
-  // Handle login button click
-  const handleLoginClick = useCallback(() => {
-    setShowLogin(true);
-  }, []);
-
-  // Memoized values
-  const showWelcome = useMemo(() => messages.length === 0, [messages.length]);
-
-  const filteredSessions = useMemo(() => {
-    if (!authSessions || authSessions.length === 0) return [];
-    return authSessions.filter((session: ChatSession) => 
-      session.title.toLowerCase().includes(searchQuery.toLowerCase())
-    );
-  }, [authSessions, searchQuery]);
+  // FIXED: Continue message handler
+  const handleContinueMessage = useCallback(async () => {
+    if (!isLoading && messages.length > 0) {
+      try {
+        await continueMessage();
+      } catch (error) {
+        console.error('Failed to continue message:', error);
+      }
+    }
+  }, [continueMessage, isLoading, messages.length]);
 
   return (
-    <div className="h-screen flex bg-background">
-      {/* FIXED: Responsive Sidebar */}
-      <FixedChatSidebar
-        isOpen={showSidebar}
-        onClose={() => setShowSidebar(false)}
-        sessions={filteredSessions}
-        currentSessionId={authCurrentSessionId}
-        onSessionSelect={handleSessionSelect}
-        onSessionDelete={handleSessionDelete}
-        onNewSession={createNewSession}
-        isLoading={false}
-      />
+    <div className="flex h-screen w-full bg-background overflow-hidden">
+      {/* Sidebar */}
+      <AnimatePresence>
+        {showSidebar && (
+          <FixedChatSidebar
+            sessions={sessions}
+            currentSessionId={currentSessionId}
+            onSessionSelect={handleSessionSelect}
+            onSessionDelete={handleSessionDelete}
+            onNewSession={createNewSession}
+            onClose={() => setShowSidebar(false)}
+            isOpen={showSidebar}
+            isLoading={isLoading}
+          />
+        )}
+      </AnimatePresence>
 
-      {/* FIXED: Main Chat Area with Responsive Margin */}
-      <div className={cn(
-        "flex-1 flex flex-col min-w-0 transition-all duration-300",
-        showSidebar && "md:ml-80" // Push content on desktop when sidebar is open
-      )}>
-        {/* Enhanced Navbar */}
+      {/* Main Chat Area */}
+      <div className="flex-1 flex flex-col min-w-0">
+        {/* FIXED: Enhanced Navbar with compatible props */}
         <EnhancedNavbar
-          user={user}
-          isAuthenticated={isAuthenticated}
-          isAdmin={isAdmin}
-          notifications={0}
-          onMenuToggle={() => setShowSidebar(!showSidebar)}
-          onHomeClick={createNewSession}
+          onHomeClick={() => setShowSidebar(true)} // FIXED: Use onHomeClick instead of onMenuClick
           onSettingsClick={() => setShowSettings(true)}
-          onLoginClick={handleLoginClick} // FIXED: Use proper handler
-          onLogoutClick={logout}
-          onUploadClick={() => {}} // Handled by file upload component
-          onVoiceToggle={handleVoiceToggle}
-          onSpeechToggle={() => setAutoSpeak(!autoSpeak)}
-          isVoiceActive={isListening}
-          isSpeechEnabled={autoSpeak}
+          onLoginClick={() => setShowLogin(true)}
+          onNewChat={createNewSession} // FIXED: Use onNewChat instead of onNewSession
+          // FIXED: Remove voice-related props if not supported by EnhancedNavbar
         />
 
         {/* Chat Messages Area */}
@@ -547,7 +398,6 @@ export function ChatBot() {
                     Start a conversation by typing a message, uploading a file, or using voice input
                   </p>
 
-                  {/* Browser Support Info */}
                   <div className="mb-6 flex justify-center gap-2">
                     <Badge variant={support.speechRecognition ? "default" : "secondary"}>
                       <Mic className="h-3 w-3 mr-1" />
@@ -558,7 +408,6 @@ export function ChatBot() {
                     </Badge>
                   </div>
 
-                  {/* Trending Topics */}
                   <TrendingCards 
                     onTopicSelect={handleTrendingTopicSelect}
                     maxCards={6}
@@ -575,7 +424,6 @@ export function ChatBot() {
                 </Alert>
               )}
 
-              {/* Voice Error Display */}
               {voiceError && (
                 <Alert variant="destructive">
                   <Mic className="h-4 w-4" />
@@ -591,14 +439,14 @@ export function ChatBot() {
                 </Alert>
               )}
 
-              {/* Messages with Continue Button */}
+              {/* Messages with FIXED Continue Button */}
               <AnimatePresence>
                 {messages.map((message, index) => (
                   <MessageWithContinue
                     key={message.id}
                     message={message}
                     isLastMessage={index === messages.length - 1}
-                    onContinue={continueMessage}
+                    onContinue={handleContinueMessage}
                     onRetry={retryLastMessage}
                     isLoading={isLoading}
                   >
@@ -610,12 +458,11 @@ export function ChatBot() {
                       <ChatMessage
                         message={message}
                         index={index}
-                        showTimestamp={chatSettings.showTimestamps}
-                        compactMode={chatSettings.compactMode}
+                        showTimestamp={chatSettings?.showTimestamps}
+                        compactMode={chatSettings?.compactMode}
                         isLastMessage={index === messages.length - 1}
                       />
                       
-                      {/* Speech Button for AI responses */}
                       {message.role === 'assistant' && support.speechSynthesis && (
                         <div className="flex justify-end mt-2">
                           <SpeechButton
@@ -647,24 +494,21 @@ export function ChatBot() {
           </ScrollArea>
         </div>
 
-        {/* FIXED: Input Area with Smart Components */}
+        {/* FIXED: Input Area */}
         <div className="border-t border-border bg-card/50 backdrop-blur-sm">
           <div className="max-w-4xl mx-auto p-4 space-y-3">
-            {/* FIXED: Smart File Upload */}
             <SmartFileUpload
               files={fileItems}
               onFilesChange={setFileItems}
               onFileAdd={handleFileAdd}
               onFileRemove={handleFileRemove}
               maxFiles={5}
-              maxFileSize={50 * 1024 * 1024} // 50MB
+              maxFileSize={50 * 1024 * 1024}
               autoCollapse={true}
               showUploadArea={true}
             />
 
-            {/* FIXED: Enhanced Input Form */}
             <div className="flex items-end gap-2">
-              {/* Voice Input */}
               {support.speechRecognition && (
                 <VoiceInput
                   onTranscriptChange={handleVoiceTranscript}
@@ -674,7 +518,6 @@ export function ChatBot() {
                 />
               )}
 
-              {/* FIXED: Enhanced Textarea */}
               <div className="flex-1">
                 <EnhancedTextarea
                   value={input}
@@ -688,7 +531,6 @@ export function ChatBot() {
                         : "Type your message..."
                   }
                   disabled={isLoading}
-                  showSendButton={true}
                   isLoading={isLoading}
                   maxLength={4000}
                   showCharacterCount={true}
@@ -698,43 +540,22 @@ export function ChatBot() {
                 />
               </div>
             </div>
-
-            {/* Footer Info */}
-            <div className="flex items-center justify-between text-xs text-muted-foreground">
-              <div className="flex items-center gap-4">
-                <span>Enhanced input with smart file handling</span>
-                {support.speechRecognition && (
-                  <span>Voice input available</span>
-                )}
-              </div>
-              <div className="flex items-center gap-2">
-                {confidence > 0 && isListening && (
-                  <Badge variant="outline" className="text-xs">
-                    Accuracy: {Math.round(confidence * 100)}%
-                  </Badge>
-                )}
-                {authCurrentSessionId && (
-                  <span>Session: {authCurrentSessionId.slice(0, 8)}...</span>
-                )}
-              </div>
-            </div>
           </div>
         </div>
       </div>
 
-      {/* Settings Dialog */}
-      <CompactSettingsDialog
-        isOpen={showSettings}
-        onClose={() => setShowSettings(false)}
+      {/* Dialogs */}
+      <CompactSettingsDialog 
+        isOpen={showSettings} 
+        onClose={() => setShowSettings(false)} 
       />
 
-      {/* FIXED: Login Dialog */}
+      {/* FIXED: LoginDialog with compatible props */}
       <LoginDialog
         isOpen={showLogin}
         onClose={() => setShowLogin(false)}
+        // FIXED: Remove onSuccess if not supported
       />
     </div>
   );
-}
-
-export default ChatBot;
+};

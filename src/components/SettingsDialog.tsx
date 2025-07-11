@@ -24,7 +24,7 @@ import { Switch } from './ui/switch';
 import { Textarea } from './ui/textarea';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from './ui/select';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from './ui/tabs';
-import { Dialog, DialogContent, DialogHeader, DialogTitle } from './ui/dialog';
+import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from './ui/dialog';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from './ui/card';
 import { Alert, AlertDescription } from './ui/alert';
 import { ScrollArea } from './ui/scroll-area';
@@ -55,15 +55,15 @@ const convertFontSizeToString = (fontSize: string | number): 'sm' | 'md' | 'lg' 
   
   if (typeof fontSize === 'number') {
     if (fontSize <= 14) return 'sm';
-    if (fontSize >= 18) return 'lg';
-    return 'md';
+    if (fontSize <= 16) return 'md';
+    return 'lg';
   }
   
   return 'md';
 };
 
 export function CompactSettingsDialog({ isOpen, onClose }: CompactSettingsDialogProps) {
-  const { 
+  const {
     modelSettings,
     chatSettings,
     appearanceSettings,
@@ -73,36 +73,32 @@ export function CompactSettingsDialog({ isOpen, onClose }: CompactSettingsDialog
     updateChatSettings,
     updateAppearanceSettings,
     updateVoiceSettings,
-    updatePrivacySettings,
-    resetSettingsToDefaults,
+    updatePrivacySettings
   } = useAuth();
 
-  const [activeTab, setActiveTab] = useState('model');
-  const [hasUnsavedChanges, setHasUnsavedChanges] = useState(false);
-  const [isSaving, setIsSaving] = useState(false);
-  const [lastSaved, setLastSaved] = useState<Date | null>(null);
   const [tempSettings, setTempSettings] = useState({
     model: { ...modelSettings },
     chat: { ...chatSettings },
     appearance: { 
       ...appearanceSettings,
-      fontSize: convertFontSizeToNumber(appearanceSettings.fontSize)
+      fontSize: convertFontSizeToNumber(appearanceSettings?.fontSize || 16)
     },
     voice: { ...voiceSettings },
     privacy: { ...privacySettings }
   });
 
-  // Track changes
+  const [isSaving, setIsSaving] = useState(false);
+  const [hasUnsavedChanges, setHasUnsavedChanges] = useState(false);
+  const [lastSaved, setLastSaved] = useState<Date | null>(null);
+
+  // Check for unsaved changes
   useEffect(() => {
     const hasChanges = 
       JSON.stringify(tempSettings.model) !== JSON.stringify(modelSettings) ||
       JSON.stringify(tempSettings.chat) !== JSON.stringify(chatSettings) ||
-      JSON.stringify({
-        ...tempSettings.appearance,
-        fontSize: convertFontSizeToNumber(tempSettings.appearance.fontSize)
-      }) !== JSON.stringify({
+      JSON.stringify(tempSettings.appearance) !== JSON.stringify({
         ...appearanceSettings,
-        fontSize: convertFontSizeToNumber(appearanceSettings.fontSize)
+        fontSize: convertFontSizeToNumber(appearanceSettings?.fontSize || 16)
       }) ||
       JSON.stringify(tempSettings.voice) !== JSON.stringify(voiceSettings) ||
       JSON.stringify(tempSettings.privacy) !== JSON.stringify(privacySettings);
@@ -117,7 +113,7 @@ export function CompactSettingsDialog({ isOpen, onClose }: CompactSettingsDialog
       chat: { ...chatSettings },
       appearance: { 
         ...appearanceSettings,
-        fontSize: convertFontSizeToNumber(appearanceSettings.fontSize)
+        fontSize: convertFontSizeToNumber(appearanceSettings?.fontSize || 16)
       },
       voice: { ...voiceSettings },
       privacy: { ...privacySettings }
@@ -133,13 +129,22 @@ export function CompactSettingsDialog({ isOpen, onClose }: CompactSettingsDialog
         fontSize: convertFontSizeToNumber(tempSettings.appearance.fontSize)
       };
 
-      await Promise.all([
-        updateModelSettings(tempSettings.model),
-        updateChatSettings(tempSettings.chat),
-        updateAppearanceSettings(appearanceToSave),
-        updateVoiceSettings(tempSettings.voice),
-        updatePrivacySettings(tempSettings.privacy)
-      ]);
+      // Save settings one by one with proper null checks
+      if (updateModelSettings) {
+        await updateModelSettings(tempSettings.model);
+      }
+      if (updateChatSettings) {
+        await updateChatSettings(tempSettings.chat);
+      }
+      if (updateAppearanceSettings) {
+        await updateAppearanceSettings(appearanceToSave);
+      }
+      if (updateVoiceSettings) {
+        await updateVoiceSettings(tempSettings.voice);
+      }
+      if (updatePrivacySettings) {
+        await updatePrivacySettings(tempSettings.privacy);
+      }
 
       setLastSaved(new Date());
       setHasUnsavedChanges(false);
@@ -156,7 +161,7 @@ export function CompactSettingsDialog({ isOpen, onClose }: CompactSettingsDialog
       chat: { ...chatSettings },
       appearance: { 
         ...appearanceSettings,
-        fontSize: convertFontSizeToNumber(appearanceSettings.fontSize)
+        fontSize: convertFontSizeToNumber(appearanceSettings?.fontSize || 16)
       },
       voice: { ...voiceSettings },
       privacy: { ...privacySettings }
@@ -173,73 +178,49 @@ export function CompactSettingsDialog({ isOpen, onClose }: CompactSettingsDialog
 
   return (
     <Dialog open={isOpen} onOpenChange={onClose}>
-      <DialogContent className="max-w-2xl max-h-[80vh] p-0">
-        <DialogHeader className="p-4 pb-0">
+      <DialogContent className="max-w-2xl max-h-[80vh] p-0 flex flex-col">
+        {/* Header */}
+        <DialogHeader className="p-4 pb-0 border-b border-border">
           <div className="flex items-center justify-between">
             <DialogTitle className="flex items-center gap-2">
               <Settings className="h-5 w-5" />
               Settings
             </DialogTitle>
-            <div className="flex items-center gap-2">
-              {lastSaved && (
-                <span className="text-xs text-muted-foreground">
-                  Saved {lastSaved.toLocaleTimeString()}
-                </span>
-              )}
-              {hasUnsavedChanges && (
-                <Button
-                  variant="outline"
-                  size="sm"
-                  onClick={handleReset}
-                  className="h-8"
-                >
-                  <RotateCcw className="h-3 w-3 mr-1" />
-                  Reset
-                </Button>
-              )}
-              <Button
-                onClick={handleSave}
-                disabled={!hasUnsavedChanges || isSaving}
-                size="sm"
-                className="h-8"
-              >
-                {isSaving ? (
-                  <Loader2 className="h-3 w-3 mr-1 animate-spin" />
-                ) : (
-                  <Save className="h-3 w-3 mr-1" />
-                )}
-                Save
-              </Button>
-            </div>
+            {lastSaved && (
+              <span className="text-xs text-muted-foreground">
+                Saved {lastSaved.toLocaleTimeString()}
+              </span>
+            )}
           </div>
         </DialogHeader>
 
-        <div className="px-4 pb-4">
-          <Tabs value={activeTab} onValueChange={setActiveTab} className="h-[500px]">
+        {/* Main Content Area - Scrollable */}
+        <div className="flex-1 overflow-hidden p-4">
+          <Tabs defaultValue="model" className="h-full flex flex-col">
             <TabsList className="grid w-full grid-cols-5 mb-4">
-              <TabsTrigger value="model" className="flex items-center gap-1 text-xs">
-                <Bot className="h-3 w-3" />
+              <TabsTrigger value="model" className="text-xs">
+                <Bot className="h-3 w-3 mr-1" />
                 Model
               </TabsTrigger>
-              <TabsTrigger value="chat" className="flex items-center gap-1 text-xs">
-                <Sliders className="h-3 w-3" />
+              <TabsTrigger value="chat" className="text-xs">
+                <Sliders className="h-3 w-3 mr-1" />
                 Chat
               </TabsTrigger>
-              <TabsTrigger value="appearance" className="flex items-center gap-1 text-xs">
-                <Palette className="h-3 w-3" />
+              <TabsTrigger value="appearance" className="text-xs">
+                <Palette className="h-3 w-3 mr-1" />
                 Theme
               </TabsTrigger>
-              <TabsTrigger value="voice" className="flex items-center gap-1 text-xs">
-                <Mic className="h-3 w-3" />
+              <TabsTrigger value="voice" className="text-xs">
+                <Volume2 className="h-3 w-3 mr-1" />
                 Voice
               </TabsTrigger>
-              <TabsTrigger value="privacy" className="flex items-center gap-1 text-xs">
-                <Shield className="h-3 w-3" />
+              <TabsTrigger value="privacy" className="text-xs">
+                <Shield className="h-3 w-3 mr-1" />
                 Privacy
               </TabsTrigger>
             </TabsList>
 
-            <ScrollArea className="h-[420px] pr-4">
+            <ScrollArea className="flex-1">
               {/* Model Settings */}
               <TabsContent value="model" className="mt-0 space-y-4">
                 <Card className="p-4">
@@ -247,45 +228,47 @@ export function CompactSettingsDialog({ isOpen, onClose }: CompactSettingsDialog
                     <div>
                       <Label htmlFor="model">AI Model</Label>
                       <Select
-                        value={tempSettings.model.model}
+                        value={tempSettings.model.model || 'gpt-4'} // FIXED: Use 'model' instead of 'selectedModel'
                         onValueChange={(value) => updateTempSettings('model', { model: value })}
                       >
                         <SelectTrigger className="mt-1">
                           <SelectValue />
                         </SelectTrigger>
                         <SelectContent>
-                          <SelectItem value="gemini-2.5-flash">Gemini 2.5 Flash</SelectItem>
+                          <SelectItem value="gpt-4">GPT-4</SelectItem>
+                          <SelectItem value="gpt-3.5-turbo">GPT-3.5 Turbo</SelectItem>
+                          <SelectItem value="claude-3">Claude 3</SelectItem>
                           <SelectItem value="gemini-pro">Gemini Pro</SelectItem>
-                          <SelectItem value="claude-3-haiku">Claude 3 Haiku</SelectItem>
                         </SelectContent>
                       </Select>
                     </div>
 
                     <div>
-                      <Label htmlFor="temperature">
-                        Temperature: {tempSettings.model.temperature}
-                      </Label>
+                      <Label htmlFor="temperature">Creativity ({tempSettings.model.temperature || 0.7})</Label>
                       <Slider
-                        value={[tempSettings.model.temperature]}
-                        onValueChange={([value]) => updateTempSettings('model', { temperature: value })}
-                        max={2}
+                        id="temperature"
                         min={0}
+                        max={2}
                         step={0.1}
+                        value={[tempSettings.model.temperature || 0.7]}
+                        onValueChange={([value]) => updateTempSettings('model', { temperature: value })}
                         className="mt-2"
                       />
+                      <p className="text-xs text-muted-foreground mt-1">
+                        Lower = more focused, Higher = more creative
+                      </p>
                     </div>
 
                     <div>
-                      <Label htmlFor="maxTokens">
-                        Max Tokens: {tempSettings.model.maxTokens}
-                      </Label>
-                      <Slider
-                        value={[tempSettings.model.maxTokens]}
-                        onValueChange={([value]) => updateTempSettings('model', { maxTokens: value })}
-                        max={8192}
-                        min={256}
-                        step={256}
-                        className="mt-2"
+                      <Label htmlFor="maxTokens">Max Response Length</Label>
+                      <Input
+                        id="maxTokens"
+                        type="number"
+                        value={tempSettings.model.maxTokens || 2048}
+                        onChange={(e) => updateTempSettings('model', { maxTokens: parseInt(e.target.value) || 2048 })}
+                        className="mt-1"
+                        min={100}
+                        max={4000}
                       />
                     </div>
 
@@ -293,11 +276,11 @@ export function CompactSettingsDialog({ isOpen, onClose }: CompactSettingsDialog
                       <Label htmlFor="systemPrompt">System Prompt</Label>
                       <Textarea
                         id="systemPrompt"
-                        value={tempSettings.model.systemPrompt}
+                        placeholder="Custom instructions for the AI..."
+                        value={tempSettings.model.systemPrompt || ''}
                         onChange={(e) => updateTempSettings('model', { systemPrompt: e.target.value })}
                         className="mt-1"
                         rows={3}
-                        placeholder="Enter system prompt..."
                       />
                     </div>
                   </div>
@@ -309,12 +292,10 @@ export function CompactSettingsDialog({ isOpen, onClose }: CompactSettingsDialog
                 <Card className="p-4">
                   <div className="space-y-4">
                     {[
-                      { key: 'autoSave', label: 'Auto-save conversations', desc: 'Automatically save chat sessions' },
+                      { key: 'autoSave', label: 'Auto-save conversations', desc: 'Automatically save chat history' },
                       { key: 'showTimestamps', label: 'Show timestamps', desc: 'Display message timestamps' },
-                      { key: 'enableSounds', label: 'Enable sounds', desc: 'Play notification sounds' },
-                      { key: 'compactMode', label: 'Compact mode', desc: 'Reduce spacing between messages' },
-                      { key: 'autoScroll', label: 'Auto-scroll', desc: 'Scroll to new messages automatically' },
-                      { key: 'markdownEnabled', label: 'Markdown rendering', desc: 'Render markdown in messages' }
+                      { key: 'compactMode', label: 'Compact mode', desc: 'Smaller message bubbles' },
+                      { key: 'enableNotifications', label: 'Enable notifications', desc: 'Desktop notifications for responses' }
                     ].map(({ key, label, desc }) => (
                       <div key={key} className="flex items-center justify-between">
                         <div>
@@ -323,11 +304,24 @@ export function CompactSettingsDialog({ isOpen, onClose }: CompactSettingsDialog
                         </div>
                         <Switch
                           id={key}
-                          checked={tempSettings.chat[key as keyof typeof tempSettings.chat] as boolean}
+                          checked={tempSettings.chat[key as keyof typeof tempSettings.chat] as boolean || false}
                           onCheckedChange={(checked) => updateTempSettings('chat', { [key]: checked })}
                         />
                       </div>
                     ))}
+
+                    <div>
+                      <Label htmlFor="messageLimit">Messages per session</Label>
+                      <Input
+                        id="messageLimit"
+                        type="number"
+                        value={tempSettings.chat.messageLimit || 50}
+                        onChange={(e) => updateTempSettings('chat', { messageLimit: parseInt(e.target.value) || 50 })}
+                        className="mt-1"
+                        min={10}
+                        max={1000}
+                      />
+                    </div>
                   </div>
                 </Card>
               </TabsContent>
@@ -339,7 +333,7 @@ export function CompactSettingsDialog({ isOpen, onClose }: CompactSettingsDialog
                     <div>
                       <Label htmlFor="theme">Theme</Label>
                       <Select
-                        value={tempSettings.appearance.theme}
+                        value={tempSettings.appearance.theme || 'system'}
                         onValueChange={(value: 'light' | 'dark' | 'system') => 
                           updateTempSettings('appearance', { theme: value })
                         }
@@ -377,7 +371,7 @@ export function CompactSettingsDialog({ isOpen, onClose }: CompactSettingsDialog
                     <div>
                       <Label htmlFor="sidebarPosition">Sidebar Position</Label>
                       <Select
-                        value={tempSettings.appearance.sidebarPosition}
+                        value={tempSettings.appearance.sidebarPosition || 'left'}
                         onValueChange={(value: 'left' | 'right') => 
                           updateTempSettings('appearance', { sidebarPosition: value })
                         }
@@ -397,7 +391,7 @@ export function CompactSettingsDialog({ isOpen, onClose }: CompactSettingsDialog
                       <Input
                         id="accentColor"
                         type="color"
-                        value={tempSettings.appearance.accentColor}
+                        value={tempSettings.appearance.accentColor || '#3b82f6'}
                         onChange={(e) => updateTempSettings('appearance', { accentColor: e.target.value })}
                         className="mt-1 h-10 w-20"
                       />
@@ -411,9 +405,9 @@ export function CompactSettingsDialog({ isOpen, onClose }: CompactSettingsDialog
                 <Card className="p-4">
                   <div className="space-y-4">
                     {[
-                      { key: 'enabled', label: 'Voice input enabled', desc: 'Enable voice recognition' },
+                      { key: 'enabled', label: 'Enable voice input', desc: 'Use microphone for input' },
                       { key: 'autoSpeak', label: 'Auto-speak responses', desc: 'Automatically read AI responses' },
-                      { key: 'recognition', label: 'Continuous recognition', desc: 'Keep listening after each input' }
+                      { key: 'recognition', label: 'Background listening', desc: 'Listen even when not focused' }
                     ].map(({ key, label, desc }) => (
                       <div key={key} className="flex items-center justify-between">
                         <div>
@@ -422,36 +416,47 @@ export function CompactSettingsDialog({ isOpen, onClose }: CompactSettingsDialog
                         </div>
                         <Switch
                           id={key}
-                          checked={tempSettings.voice[key as keyof typeof tempSettings.voice] as boolean}
+                          checked={tempSettings.voice[key as keyof typeof tempSettings.voice] as boolean || false}
                           onCheckedChange={(checked) => updateTempSettings('voice', { [key]: checked })}
                         />
                       </div>
                     ))}
 
                     <div>
-                      <Label htmlFor="rate">
-                        Speech Rate: {tempSettings.voice.rate}
-                      </Label>
+                      <Label htmlFor="speechRate">Speech Rate ({tempSettings.voice.rate || 1})</Label> {/* FIXED: Use 'rate' instead of 'speechRate' */}
                       <Slider
-                        value={[tempSettings.voice.rate]}
-                        onValueChange={([value]) => updateTempSettings('voice', { rate: value })}
-                        max={2}
+                        id="speechRate"
                         min={0.5}
+                        max={2}
                         step={0.1}
+                        value={[tempSettings.voice.rate || 1]}
+                        onValueChange={([value]) => updateTempSettings('voice', { rate: value })}  
                         className="mt-2"
                       />
                     </div>
 
                     <div>
-                      <Label htmlFor="volume">
-                        Volume: {Math.round(tempSettings.voice.volume * 100)}%
-                      </Label>
+                      <Label htmlFor="speechPitch">Speech Pitch ({tempSettings.voice.pitch || 1})</Label> {/* FIXED: Use 'pitch' instead of 'speechPitch' */}
                       <Slider
-                        value={[tempSettings.voice.volume]}
-                        onValueChange={([value]) => updateTempSettings('voice', { volume: value })}
-                        max={1}
+                        id="speechPitch"
                         min={0}
+                        max={2}
                         step={0.1}
+                        value={[tempSettings.voice.pitch || 1]}
+                        onValueChange={([value]) => updateTempSettings('voice', { pitch: value })} 
+                        className="mt-2"
+                      />
+                    </div>
+
+                    <div>
+                      <Label htmlFor="volume">Volume ({tempSettings.voice.volume || 1})</Label>
+                      <Slider
+                        id="volume"
+                        min={0}
+                        max={1}
+                        step={0.1}
+                        value={[tempSettings.voice.volume || 1]}
+                        onValueChange={([value]) => updateTempSettings('voice', { volume: value })}
                         className="mt-2"
                       />
                     </div>
@@ -476,7 +481,7 @@ export function CompactSettingsDialog({ isOpen, onClose }: CompactSettingsDialog
                         </div>
                         <Switch
                           id={key}
-                          checked={tempSettings.privacy[key as keyof typeof tempSettings.privacy] as boolean}
+                          checked={tempSettings.privacy[key as keyof typeof tempSettings.privacy] as boolean || false}
                           onCheckedChange={(checked) => updateTempSettings('privacy', { [key]: checked })}
                         />
                       </div>
@@ -487,7 +492,7 @@ export function CompactSettingsDialog({ isOpen, onClose }: CompactSettingsDialog
                       <Input
                         id="autoDeleteAfter"
                         type="number"
-                        value={tempSettings.privacy.autoDeleteAfter}
+                        value={tempSettings.privacy.autoDeleteAfter || 30}
                         onChange={(e) => updateTempSettings('privacy', { autoDeleteAfter: parseInt(e.target.value) || 30 })}
                         className="mt-1"
                         min={1}
@@ -498,16 +503,52 @@ export function CompactSettingsDialog({ isOpen, onClose }: CompactSettingsDialog
                 </Card>
               </TabsContent>
             </ScrollArea>
-          </Tabs>
 
-          {hasUnsavedChanges && (
-            <Alert className="mt-4">
-              <AlertDescription>
-                You have unsaved changes. Click Save to apply them.
-              </AlertDescription>
-            </Alert>
-          )}
+            {hasUnsavedChanges && (
+              <Alert className="mt-4">
+                <AlertDescription>
+                  You have unsaved changes. Click Save to apply them.
+                </AlertDescription>
+              </Alert>
+            )}
+          </Tabs>
         </div>
+
+        {/* Footer with buttons positioned at bottom right */}
+        <DialogFooter className="p-4 border-t border-border">
+          <div className="flex justify-end gap-2 w-full">
+            {hasUnsavedChanges && (
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={handleReset}
+                className="h-8"
+                disabled={isSaving}
+              >
+                <RotateCcw className="h-3 w-3 mr-1" />
+                Reset
+              </Button>
+            )}
+            <Button
+              onClick={handleSave}
+              disabled={!hasUnsavedChanges || isSaving}
+              size="sm"
+              className="h-8"
+            >
+              {isSaving ? (
+                <>
+                  <Loader2 className="h-3 w-3 mr-1 animate-spin" />
+                  Saving...
+                </>
+              ) : (
+                <>
+                  <Save className="h-3 w-3 mr-1" />
+                  Save
+                </>
+              )}
+            </Button>
+          </div>
+        </DialogFooter>
       </DialogContent>
     </Dialog>
   );

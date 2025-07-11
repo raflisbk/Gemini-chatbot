@@ -117,11 +117,13 @@ const LoginForm: React.FC<LoginFormProps> = ({
           )}
           
           <div className="flex flex-col items-center text-center space-y-3">
-            <div className="w-12 h-12 rounded-full bg-gradient-to-br from-emerald-500 to-blue-600 flex items-center justify-center">
-              <LogIn className="w-6 h-6 text-white" />
+            {/* FIXED: Icon with consistent color palette */}
+            <div className="w-12 h-12 rounded-full bg-gradient-to-br from-primary to-primary/80 flex items-center justify-center">
+              <LogIn className="w-6 h-6 text-primary-foreground" />
             </div>
             <div>
-              <CardTitle className="text-xl font-bold bg-gradient-to-r from-emerald-600 to-blue-600 bg-clip-text text-transparent">
+              {/* FIXED: Title with consistent color palette */}
+              <CardTitle className="text-xl font-bold bg-gradient-to-r from-primary to-primary/80 bg-clip-text text-transparent">
                 Welcome Back
               </CardTitle>
               <p className="text-sm text-muted-foreground mt-1">
@@ -210,67 +212,73 @@ const LoginForm: React.FC<LoginFormProps> = ({
               )}
             </div>
 
-            {/* Submit Button */}
+            {/* FIXED: Submit Button with consistent color palette */}
             <Button
               type="submit"
-              className="w-full h-10 bg-gradient-to-r from-emerald-500 to-blue-600 hover:from-emerald-600 hover:to-blue-700"
+              className="w-full h-10 bg-primary hover:bg-primary/90 text-primary-foreground"
               disabled={isSubmitting || isLoading}
             >
               {isSubmitting || isLoading ? (
                 <>
-                  <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-                  Signing in...
+                  <Loader2 className="w-4 h-4 mr-2 animate-spin" />
+                  Signing In...
                 </>
               ) : (
-                'Sign In'
+                <>
+                  <LogIn className="w-4 h-4 mr-2" />
+                  Sign In
+                </>
               )}
             </Button>
           </form>
 
-          {/* Guest Option */}
+          {/* FIXED: Guest Access Button with consistent styling */}
           {showGuestOption && (
-            <div className="space-y-3">
-              <div className="relative">
-                <div className="absolute inset-0 flex items-center">
-                  <div className="w-full border-t border-muted-foreground/20" />
-                </div>
-                <div className="relative flex justify-center text-xs uppercase">
-                  <span className="bg-background px-2 text-muted-foreground">or</span>
-                </div>
-              </div>
-
+            <div className="text-center">
+              <p className="text-xs text-muted-foreground mb-3">
+                or continue without an account
+              </p>
               <Button
                 variant="outline"
-                className="w-full h-10"
                 onClick={handleGuestAccess}
-                disabled={isSubmitting}
+                className="w-full h-10 border-primary/20 hover:bg-primary/5 hover:border-primary/40"
+                disabled={isLoading}
               >
+                <User className="w-4 h-4 mr-2" />
                 Continue as Guest
-                <span className="ml-2 text-xs text-muted-foreground">(5 messages)</span>
               </Button>
             </div>
           )}
 
-          {/* Account Benefits Info */}
-          <div className="p-4 bg-muted/30 rounded-lg">
-            <h4 className="text-sm font-medium mb-2">Account Benefits:</h4>
+          {/* FIXED: Account Benefits Info with consistent styling */}
+          <div className="mt-6 p-4 bg-muted/30 rounded-lg border border-border/50">
+            <h4 className="text-sm font-medium mb-2 text-foreground">Account Benefits:</h4>
             <ul className="text-xs text-muted-foreground space-y-1">
               <li className="flex items-center gap-2">
-                <User className="w-3 h-3" />
+                <User className="w-3 h-3 text-primary" />
                 Regular User: 25 messages per day
               </li>
               <li className="flex items-center gap-2">
-                <Crown className="w-3 h-3" />
+                <Crown className="w-3 h-3 text-primary" />
                 Admin: Unlimited messages + Settings access
               </li>
-              <li>• Save conversation history</li>
-              <li>• Upload files and images</li>
-              <li>• Voice features</li>
+              <li className="flex items-center gap-2">
+                <span className="w-3 h-3 flex items-center justify-center">•</span>
+                Save conversation history
+              </li>
+              <li className="flex items-center gap-2">
+                <span className="w-3 h-3 flex items-center justify-center">•</span>
+                Upload files and images
+              </li>
+              <li className="flex items-center gap-2">
+                <span className="w-3 h-3 flex items-center justify-center">•</span>
+                Voice features
+              </li>
             </ul>
           </div>
 
           {/* Footer Note */}
-          <div className="text-center">
+          <div className="mt-4 text-center">
             <p className="text-xs text-muted-foreground">
               New accounts can only be created by administrators.
             </p>
@@ -285,7 +293,7 @@ const LoginForm: React.FC<LoginFormProps> = ({
   }
 
   return (
-    <div className="min-h-screen flex items-center justify-center p-4 bg-gradient-to-br from-background via-muted/50 to-background">
+    <div className="min-h-screen flex items-center justify-center p-4 bg-background">
       <LoginContent />
     </div>
   );

@@ -1,29 +1,42 @@
 'use client';
 
-import React, { useState, useCallback } from 'react';
+import React from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { 
-  Search, 
+  X, 
   Plus, 
   MessageSquare, 
-  Trash2, 
-  Clock, 
-  X,
-  MoreVertical,
+  Trash2,
+  Search,
   Archive,
-  Edit2
+  Clock,
+  User,
+  Crown,
+  Shield,
+  Loader2
 } from 'lucide-react';
+
 import { Button } from './ui/button';
 import { Input } from './ui/input';
 import { ScrollArea } from './ui/scroll-area';
 import { Badge } from './ui/badge';
-import { 
-  DropdownMenu,
-  DropdownMenuContent,
-  DropdownMenuItem,
-  DropdownMenuTrigger,
-} from './ui/dropdown-menu';
-import { cn } from '@/lib/utils';
+import { Card, CardContent } from './ui/card';
+import Logo from './Logo';
+
+// FIXED: Complete interface matching the expected props
+export interface FixedChatSidebarProps {
+  sessions: ChatSession[];
+  currentSessionId: string | null;
+  onSessionSelect: (sessionId: string) => void;
+  onSessionDelete: (sessionId: string) => void;
+  onNewSession: () => void;
+  onClose: () => void;
+  isOpen: boolean;          // FIXED: Added missing property
+  isLoading?: boolean;      // FIXED: Added missing property
+  user?: any;               // Optional user data
+  profile?: any;            // Optional profile data
+  isGuest?: boolean;        // Optional guest status
+}
 
 interface ChatSession {
   id: string;
@@ -39,141 +52,153 @@ interface ChatSession {
   messages?: any[];
 }
 
-interface FixedChatSidebarProps {
-  isOpen: boolean;
-  onClose: () => void;
-  sessions: ChatSession[];
-  currentSessionId: string | null;
-  onSessionSelect: (sessionId: string) => void;
-  onSessionDelete: (sessionId: string) => void;
-  onNewSession: () => void;
-  isLoading: boolean;
-}
-
-export function FixedChatSidebar({
-  isOpen,
-  onClose,
+const FixedChatSidebar: React.FC<FixedChatSidebarProps> = ({
   sessions,
   currentSessionId,
   onSessionSelect,
   onSessionDelete,
   onNewSession,
-  isLoading
-}: FixedChatSidebarProps) {
-  const [searchQuery, setSearchQuery] = useState('');
-  const [editingSessionId, setEditingSessionId] = useState<string | null>(null);
-  const [editTitle, setEditTitle] = useState('');
+  onClose,
+  isOpen,
+  isLoading = false,
+  user,
+  profile,
+  isGuest = false
+}) => {
+  const [searchQuery, setSearchQuery] = React.useState('');
+  const [filteredSessions, setFilteredSessions] = React.useState(sessions);
 
-  // Filter sessions based on search
-  const filteredSessions = sessions.filter(session =>
-    session.title.toLowerCase().includes(searchQuery.toLowerCase()) ||
-    (session.context_summary && session.context_summary.toLowerCase().includes(searchQuery.toLowerCase()))
-  );
-
-  const handleSessionClick = useCallback((sessionId: string) => {
-    onSessionSelect(sessionId);
-    // Close sidebar on mobile after selection
-    if (window.innerWidth < 768) {
-      onClose();
+  // Filter sessions based on search query
+  React.useEffect(() => {
+    if (searchQuery.trim()) {
+      const filtered = sessions.filter(session => 
+        session.title.toLowerCase().includes(searchQuery.toLowerCase()) ||
+        session.context_summary?.toLowerCase().includes(searchQuery.toLowerCase())
+      );
+      setFilteredSessions(filtered);
+    } else {
+      setFilteredSessions(sessions);
     }
-  }, [onSessionSelect, onClose]);
+  }, [sessions, searchQuery]);
 
-  const handleNewSession = useCallback(() => {
-    onNewSession();
-    // Close sidebar on mobile after creating new session
-    if (window.innerWidth < 768) {
-      onClose();
-    }
-  }, [onNewSession, onClose]);
-
-  const handleEditStart = useCallback((session: ChatSession) => {
-    setEditingSessionId(session.id);
-    setEditTitle(session.title);
-  }, []);
-
-  const handleEditSave = useCallback((sessionId: string) => {
-    // Here you would typically call an API to update the session title
-    console.log('Saving session title:', sessionId, editTitle);
-    setEditingSessionId(null);
-    setEditTitle('');
-  }, [editTitle]);
-
-  const handleEditCancel = useCallback(() => {
-    setEditingSessionId(null);
-    setEditTitle('');
-  }, []);
-
-  const formatTime = (dateString: string) => {
+  const formatDate = (dateString: string) => {
     const date = new Date(dateString);
     const now = new Date();
-    const diffInMinutes = Math.floor((now.getTime() - date.getTime()) / (1000 * 60));
-    
-    if (diffInMinutes < 1) return 'Just now';
-    if (diffInMinutes < 60) return `${diffInMinutes}m ago`;
-    if (diffInMinutes < 1440) return `${Math.floor(diffInMinutes / 60)}h ago`;
-    if (diffInMinutes < 10080) return `${Math.floor(diffInMinutes / 1440)}d ago`;
-    return date.toLocaleDateString();
+    const diffInHours = (now.getTime() - date.getTime()) / (1000 * 60 * 60);
+
+    if (diffInHours < 1) {
+      return 'Just now';
+    } else if (diffInHours < 24) {
+      return `${Math.floor(diffInHours)} hours ago`;
+    } else if (diffInHours < 48) {
+      return 'Yesterday';
+    } else {
+      return date.toLocaleDateString();
+    }
+  };
+
+  const getUserStatusBadge = () => {
+    if (!user) return null;
+
+    if (user.role === 'admin') {
+      return (
+        <Badge variant="default" className="flex items-center gap-1">
+          <Crown className="h-3 w-3" />
+          Admin
+        </Badge>
+      );
+    } else if (isGuest) {
+      return (
+        <Badge variant="secondary" className="flex items-center gap-1">
+          <User className="h-3 w-3" />
+          Guest
+        </Badge>
+      );
+    } else {
+      return (
+        <Badge variant="outline" className="flex items-center gap-1">
+          <Shield className="h-3 w-3" />
+          User
+        </Badge>
+      );
+    }
   };
 
   return (
-    <>
-      {/* Mobile Overlay */}
-      <AnimatePresence>
-        {isOpen && (
+    <AnimatePresence>
+      {isOpen && (
+        <>
+          {/* Backdrop */}
           <motion.div
             initial={{ opacity: 0 }}
             animate={{ opacity: 1 }}
             exit={{ opacity: 0 }}
+            className="fixed inset-0 bg-background/80 backdrop-blur-sm z-40 md:hidden"
             onClick={onClose}
-            className="fixed inset-0 bg-black/50 z-40 md:hidden"
           />
-        )}
-      </AnimatePresence>
 
-      {/* FIXED: Sidebar - Mobile overlay, Desktop fixed position */}
-      <AnimatePresence>
-        {isOpen && (
-          <motion.aside
-            initial={{ x: '-100%' }}
-            animate={{ x: 0 }}
-            exit={{ x: '-100%' }}
-            transition={{ type: 'spring', damping: 25, stiffness: 200 }}
-            className={cn(
-              "fixed top-0 left-0 h-full w-80 bg-background border-r z-50",
-              "md:z-30", // Lower z-index on desktop
-              "flex flex-col"
-            )}
+          {/* Sidebar */}
+          <motion.div
+            initial={{ x: -320, opacity: 0 }}
+            animate={{ x: 0, opacity: 1 }}
+            exit={{ x: -320, opacity: 0 }}
+            transition={{ type: "spring", damping: 30, stiffness: 300 }}
+            className="fixed left-0 top-0 bottom-0 w-80 bg-card border-r border-border z-50 flex flex-col"
           >
             {/* Header */}
-            <div className="flex items-center justify-between p-4 border-b">
-              <h2 className="text-lg font-semibold">Chat History</h2>
-              <div className="flex items-center gap-2">
-                <Button
-                  variant="ghost"
-                  size="icon"
-                  onClick={handleNewSession}
-                  className="h-8 w-8"
-                  title="New conversation"
-                >
-                  <Plus className="h-4 w-4" />
-                </Button>
+            <div className="p-4 border-b border-border">
+              <div className="flex items-center justify-between mb-4">
+                <Logo size="sm" variant="gradient" showText={true} />
                 <Button
                   variant="ghost"
                   size="icon"
                   onClick={onClose}
-                  className="h-8 w-8 md:hidden" // Only show close button on mobile
+                  className="h-8 w-8"
                 >
                   <X className="h-4 w-4" />
                 </Button>
               </div>
+
+              {/* User Info */}
+              {user && (
+                <div className="flex items-center justify-between mb-4">
+                  <div className="flex items-center gap-2">
+                    <div className="w-8 h-8 rounded-full bg-primary/20 flex items-center justify-center">
+                      <User className="h-4 w-4 text-primary" />
+                    </div>
+                    <div>
+                      <p className="text-sm font-medium">
+                        {user.email || user.name || 'User'}
+                      </p>
+                      <p className="text-xs text-muted-foreground">
+                        {profile?.quota_used || 0} / {profile?.quota_limit || 25} messages
+                      </p>
+                    </div>
+                  </div>
+                  {getUserStatusBadge()}
+                </div>
+              )}
+
+              {/* New Chat Button */}
+              <Button
+                onClick={onNewSession}
+                className="w-full flex items-center gap-2"
+                disabled={isLoading}
+              >
+                {isLoading ? (
+                  <Loader2 className="h-4 w-4 animate-spin" />
+                ) : (
+                  <Plus className="h-4 w-4" />
+                )}
+                New Chat
+              </Button>
             </div>
 
             {/* Search */}
-            <div className="p-4 border-b">
+            <div className="p-4 border-b border-border">
               <div className="relative">
                 <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 h-4 w-4 text-muted-foreground" />
                 <Input
-                  type="text"
                   placeholder="Search conversations..."
                   value={searchQuery}
                   onChange={(e) => setSearchQuery(e.target.value)}
@@ -186,149 +211,103 @@ export function FixedChatSidebar({
             <ScrollArea className="flex-1">
               <div className="p-2 space-y-1">
                 {isLoading ? (
-                  // Loading skeleton
-                  <div className="space-y-2">
-                    {[...Array(5)].map((_, i) => (
-                      <div key={i} className="p-3 rounded-lg">
-                        <div className="h-4 bg-muted animate-pulse rounded mb-2" />
-                        <div className="h-3 bg-muted animate-pulse rounded w-3/4" />
-                      </div>
-                    ))}
+                  // Loading State
+                  <div className="flex items-center justify-center py-8">
+                    <div className="flex items-center gap-2 text-muted-foreground">
+                      <Loader2 className="h-4 w-4 animate-spin" />
+                      <span className="text-sm">Loading conversations...</span>
+                    </div>
                   </div>
                 ) : filteredSessions.length === 0 ? (
-                  // Empty state
+                  // Empty State
                   <div className="flex flex-col items-center justify-center py-8 text-center">
-                    <MessageSquare className="h-12 w-12 text-muted-foreground mb-4" />
-                    <p className="text-sm text-muted-foreground">
+                    <MessageSquare className="h-8 w-8 text-muted-foreground mb-2" />
+                    <p className="text-sm text-muted-foreground mb-1">
                       {searchQuery ? 'No conversations found' : 'No conversations yet'}
                     </p>
-                    <p className="text-xs text-muted-foreground mt-1">
-                      {searchQuery ? 'Try different keywords' : 'Start a new conversation to begin'}
+                    <p className="text-xs text-muted-foreground">
+                      {searchQuery ? 'Try a different search term' : 'Start a new chat to begin'}
                     </p>
                   </div>
                 ) : (
-                  // Sessions list
+                  // Sessions List
                   filteredSessions.map((session) => (
-                    <div key={session.id} className="group relative">
-                      <div
-                        className={cn(
-                          "flex items-center gap-3 p-3 rounded-lg cursor-pointer transition-colors",
-                          "hover:bg-muted/50",
-                          currentSessionId === session.id && "bg-muted border-l-2 border-primary"
-                        )}
-                        onClick={() => handleSessionClick(session.id)}
-                      >
-                        <div className="flex-1 min-w-0">
-                          {editingSessionId === session.id ? (
+                    <Card
+                      key={session.id}
+                      className={`cursor-pointer transition-all duration-200 hover:bg-muted/50 ${
+                        currentSessionId === session.id ? 'bg-primary/10 border-primary' : 'border-transparent'
+                      }`}
+                      onClick={() => onSessionSelect(session.id)}
+                    >
+                      <CardContent className="p-3">
+                        <div className="flex items-start justify-between">
+                          <div className="flex-1 min-w-0">
+                            {/* Session Title */}
+                            <p className="text-sm font-medium truncate mb-1">
+                              {session.title || `Chat ${session.id.slice(0, 8)}`}
+                            </p>
+                            
+                            {/* Session Preview */}
+                            {session.context_summary && (
+                              <p className="text-xs text-muted-foreground line-clamp-2 mb-2">
+                                {session.context_summary}
+                              </p>
+                            )}
+                            
+                            {/* Session Meta */}
                             <div className="flex items-center gap-2">
-                              <Input
-                                value={editTitle}
-                                onChange={(e) => setEditTitle(e.target.value)}
-                                onKeyDown={(e) => {
-                                  if (e.key === 'Enter') {
-                                    handleEditSave(session.id);
-                                  } else if (e.key === 'Escape') {
-                                    handleEditCancel();
-                                  }
-                                }}
-                                onBlur={() => handleEditSave(session.id)}
-                                className="h-6 text-sm"
-                                autoFocus
-                              />
+                              <Badge variant="outline" className="text-xs">
+                                <MessageSquare className="h-2 w-2 mr-1" />
+                                {session.message_count}
+                              </Badge>
+                              <span className="text-xs text-muted-foreground flex items-center gap-1">
+                                <Clock className="h-2 w-2" />
+                                {formatDate(session.last_message_at)}
+                              </span>
                             </div>
-                          ) : (
-                            <>
-                              <h3 className="text-sm font-medium truncate">
-                                {session.title}
-                              </h3>
-                              <div className="flex items-center gap-2 mt-1">
-                                <p className="text-xs text-muted-foreground truncate">
-                                  {session.context_summary || 'No preview available'}
-                                </p>
-                              </div>
-                              <div className="flex items-center justify-between mt-1">
-                                <div className="flex items-center gap-2">
-                                  <Clock className="h-3 w-3 text-muted-foreground" />
-                                  <span className="text-xs text-muted-foreground">
-                                    {formatTime(session.last_message_at)}
-                                  </span>
-                                </div>
-                                <Badge variant="secondary" className="text-xs">
-                                  {session.message_count}
-                                </Badge>
-                              </div>
-                            </>
-                          )}
-                        </div>
-
-                        {/* Session Actions */}
-                        {editingSessionId !== session.id && (
-                          <div className="opacity-0 group-hover:opacity-100 transition-opacity">
-                            <DropdownMenu>
-                              <DropdownMenuTrigger asChild>
-                                <Button
-                                  variant="ghost"
-                                  size="icon"
-                                  className="h-6 w-6"
-                                  onClick={(e) => e.stopPropagation()}
-                                >
-                                  <MoreVertical className="h-3 w-3" />
-                                </Button>
-                              </DropdownMenuTrigger>
-                              <DropdownMenuContent align="end" className="w-48">
-                                <DropdownMenuItem
-                                  onClick={(e) => {
-                                    e.stopPropagation();
-                                    handleEditStart(session);
-                                  }}
-                                >
-                                  <Edit2 className="h-3 w-3 mr-2" />
-                                  Rename
-                                </DropdownMenuItem>
-                                <DropdownMenuItem
-                                  onClick={(e) => {
-                                    e.stopPropagation();
-                                    // Add archive functionality
-                                  }}
-                                >
-                                  <Archive className="h-3 w-3 mr-2" />
-                                  Archive
-                                </DropdownMenuItem>
-                                <DropdownMenuItem
-                                  onClick={(e) => {
-                                    e.stopPropagation();
-                                    onSessionDelete(session.id);
-                                  }}
-                                  className="text-destructive focus:text-destructive"
-                                >
-                                  <Trash2 className="h-3 w-3 mr-2" />
-                                  Delete
-                                </DropdownMenuItem>
-                              </DropdownMenuContent>
-                            </DropdownMenu>
                           </div>
-                        )}
-                      </div>
-                    </div>
+
+                          {/* Actions */}
+                          <div className="flex items-center gap-1 ml-2">
+                            {session.is_active && (
+                              <div className="w-2 h-2 bg-green-500 rounded-full" />
+                            )}
+                            <Button
+                              variant="ghost"
+                              size="icon"
+                              className="h-6 w-6 opacity-0 group-hover:opacity-100 transition-opacity"
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                onSessionDelete(session.id);
+                              }}
+                            >
+                              <Trash2 className="h-3 w-3" />
+                            </Button>
+                          </div>
+                        </div>
+                      </CardContent>
+                    </Card>
                   ))
                 )}
               </div>
             </ScrollArea>
 
             {/* Footer */}
-            <div className="p-4 border-t">
+            <div className="p-4 border-t border-border">
               <div className="flex items-center justify-between text-xs text-muted-foreground">
                 <span>{filteredSessions.length} conversations</span>
-                <span>
-                  {searchQuery && `Filtered from ${sessions.length}`}
-                </span>
+                {user && (
+                  <span>
+                    {isGuest ? 'Guest Mode' : 'Signed In'}
+                  </span>
+                )}
               </div>
             </div>
-          </motion.aside>
-        )}
-      </AnimatePresence>
-    </>
+          </motion.div>
+        </>
+      )}
+    </AnimatePresence>
   );
-}
+};
 
 export default FixedChatSidebar;
