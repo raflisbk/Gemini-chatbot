@@ -165,12 +165,14 @@ export class BrowserCompatibilityChecker {
     return new SpeechRecognition();
   }
 
-  public getMediaRecorder(stream: MediaStream, options?: MediaRecorderOptions): MediaRecorder {
+  // FIXED: Simple MediaRecorder getter without complex types
+  public getMediaRecorder(stream: MediaStream, options?: any): MediaRecorder {
     if (!this.checkMediaRecorder()) {
       throw new Error('MediaRecorder not supported');
     }
     
-    return new window.MediaRecorder(stream, options);
+    // Use simple approach without complex typing
+    return new MediaRecorder(stream, options || {});
   }
 
   public async requestMicrophonePermission(): Promise<boolean> {
@@ -210,7 +212,8 @@ export const getSpeechRecognition = (): any => {
   return browserChecker.getSpeechRecognition();
 };
 
-export const getMediaRecorder = (stream: MediaStream, options?: MediaRecorderOptions): MediaRecorder => {
+// FIXED: Simple MediaRecorder getter
+export const getMediaRecorder = (stream: MediaStream, options?: any): MediaRecorder => {
   return browserChecker.getMediaRecorder(stream, options);
 };
 

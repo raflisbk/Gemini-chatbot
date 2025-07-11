@@ -1,4 +1,4 @@
-// src/utils/index.ts - Main utility exports
+// src/utils/index.ts - Fixed utility exports
 
 // Browser compatibility
 export {
@@ -11,7 +11,7 @@ export {
   useBrowserCapabilities
 } from './browserSupport';
 
-// Media recording
+// Media recording - FIXED exports
 export {
   MediaRecorderHelper,
   createAudioFile,
@@ -28,7 +28,7 @@ export {
 // Re-export common utilities
 export * from '../lib/utils';
 
-// Types re-exports from correct sources
+// Types re-exports - FIXED: Import from mediaRecorder since it re-exports from types/media
 export type {
   BrowserCapabilities
 } from './browserSupport';
@@ -44,7 +44,3 @@ export type {
   AppError,
   ErrorSeverity
 } from './errorHandler';
-
-export type {
-  AppearanceSettings
-} from '../types/appearanceSettings';

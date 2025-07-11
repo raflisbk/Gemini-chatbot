@@ -12,7 +12,10 @@ export {
   SpeechButton 
 } from './VoiceInput';
 export { FixedChatSidebar } from './ChatSidebar';
-export { MultimodalUpload } from './MultimodalUpload';
+
+// FIXED: Use default export/import for MultimodalUpload
+export { default as MultimodalUpload } from './MultimodalUpload';
+
 export { 
   ContinueButton, 
   MessageWithContinue, 

@@ -50,7 +50,7 @@ import { Alert, AlertDescription } from './ui/alert';
 import { Badge } from './ui/badge';
 import { Card, CardContent } from './ui/card';
 
-// Enhanced Components
+// Enhanced Components - FIXED: Use default import for MultimodalUpload
 import { ChatMessage } from './ChatMessage';
 import { LoadingDots } from './LoadingDots';
 import { Logo } from './Logo';
@@ -58,7 +58,7 @@ import { ThemeToggle } from './ThemeToggle';
 import { CompactSettingsDialog } from './SettingsDialog';
 import { VoiceInput, SpeechButton } from './VoiceInput';
 import { FixedChatSidebar } from './ChatSidebar';
-import { MultimodalUpload } from './MultimodalUpload';
+import MultimodalUpload from './MultimodalUpload'; // FIXED: Default import
 import { MessageWithContinue } from './ContinueButton';
 import { TrendingCards } from './TrendingCards';
 import { EnhancedNavbar } from './EnhancedNavbar';
@@ -109,6 +109,16 @@ interface BrowserSupport {
   microphone: boolean;
   browserName: string;
   isSupported: boolean;
+}
+
+// FIXED: Updated UploadedFile interface to match MultimodalUpload
+interface UploadedFile {
+  id: string;
+  file: File;
+  url: string;
+  type: 'image' | 'video' | 'audio' | 'document';
+  progress: number;
+  status: 'uploading' | 'completed' | 'error';
 }
 
 // Browser Support Hook
@@ -235,6 +245,7 @@ export function ChatBot() {
   const [showSettings, setShowSettings] = useState(false);
   const [showUpload, setShowUpload] = useState(false);
   const [selectedFiles, setSelectedFiles] = useState<File[]>([]);
+  const [uploadedFiles, setUploadedFiles] = useState<UploadedFile[]>([]); // FIXED: Added this state
   const [searchQuery, setSearchQuery] = useState('');
   const [isVoiceEnabled, setIsVoiceEnabled] = useState(false);
   const [autoSpeak, setAutoSpeak] = useState(false);
@@ -359,31 +370,82 @@ export function ChatBot() {
 
   // Send message
   const handleSendMessage = useCallback(async () => {
-    if (!input.trim() && selectedFiles.length === 0) return;
+    if (!input.trim() && selectedFiles.length === 0 && uploadedFiles.length === 0) return;
     if (isLoading) return;
 
     try {
+      // Combine selected files and uploaded files
+      const allFiles = [
+        ...selectedFiles,
+        ...uploadedFiles.map(uf => uf.file)
+      ];
+
       await sendMessage(input, {
-        files: selectedFiles,
+        files: allFiles,
         sessionId: authCurrentSessionId || undefined
       });
 
       // Clear input and files
       setInput('');
       setSelectedFiles([]);
+      setUploadedFiles([]);
       setShowUpload(false);
     } catch (error) {
       console.error('Failed to send message:', error);
     }
-  }, [input, selectedFiles, isLoading, sendMessage, authCurrentSessionId]);
+  }, [input, selectedFiles, uploadedFiles, isLoading, sendMessage, authCurrentSessionId]);
 
-  // Handle file selection
+  // FIXED: Handle file changes with proper typing
   const handleFilesChange = useCallback((files: File[]) => {
     setSelectedFiles(files);
   }, []);
 
+  // FIXED: Handle uploaded files from MultimodalUpload
+  const handleFilesUploaded = useCallback((files: UploadedFile[]) => {
+    setUploadedFiles(files);
+  }, []);
+
+  // FIXED: Handle audio recording with simple approach
+  const handleAudioRecorded = useCallback((audioBlob: Blob) => {
+    try {
+      // Create File dengan type detection
+      const audioType = audioBlob.type || 'audio/webm';
+      const extension = audioType.includes('wav') ? '.wav' : '.webm';
+      const fileName = `audio-${Date.now()}${extension}`;
+      
+      const audioFile = new (window as any).File([audioBlob], fileName, {
+        type: audioType
+      });
+      
+      setSelectedFiles(prev => [...prev, audioFile]);
+    } catch (error) {
+      console.error('Error creating audio file:', error);
+    }
+  }, []);
+
+  // FIXED: Handle video recording with simple approach
+  const handleVideoRecorded = useCallback((videoBlob: Blob) => {
+    try {
+      // Create File dengan type detection
+      const videoType = videoBlob.type || 'video/webm';
+      const extension = videoType.includes('mp4') ? '.mp4' : '.webm';
+      const fileName = `video-${Date.now()}${extension}`;
+      
+      const videoFile = new (window as any).File([videoBlob], fileName, {
+        type: videoType
+      });
+      
+      setSelectedFiles(prev => [...prev, videoFile]);
+    } catch (error) {
+      console.error('Error creating video file:', error);
+    }
+  }, []);
+
   const handleFileRemove = useCallback((fileId: string) => {
-    // For MultimodalUpload compatibility
+    // Remove from uploaded files
+    setUploadedFiles(prev => prev.filter(f => f.id !== fileId));
+    
+    // Remove from selected files if needed
     console.log('Removing file:', fileId);
   }, []);
 
@@ -619,7 +681,7 @@ export function ChatBot() {
           </ScrollArea>
         </div>
 
-        {/* File Upload Area */}
+        {/* File Upload Area - FIXED: Updated props */}
         <AnimatePresence>
           {showUpload && (
             <motion.div
@@ -630,12 +692,11 @@ export function ChatBot() {
             >
               <div className="max-w-4xl mx-auto p-4">
                 <MultimodalUpload
-                  onFilesChange={handleFilesChange}
-                  onFileRemove={handleFileRemove}
+                  onFilesUploaded={handleFilesUploaded}
+                  onAudioRecorded={handleAudioRecorded}
+                  onVideoRecorded={handleVideoRecorded}
                   maxFiles={5}
-                  maxFileSize={50}
-                  showPreview={true}
-                  disabled={isLoading}
+                  maxFileSize={50 * 1024 * 1024} // 50MB
                 />
               </div>
             </motion.div>
@@ -646,11 +707,12 @@ export function ChatBot() {
         <div className="border-t border-border bg-card/50 backdrop-blur-sm">
           <div className="max-w-4xl mx-auto p-4">
             {/* Selected Files Preview */}
-            {selectedFiles.length > 0 && (
+            {(selectedFiles.length > 0 || uploadedFiles.length > 0) && (
               <div className="mb-3 flex flex-wrap gap-2">
+                {/* Selected Files */}
                 {selectedFiles.map((file, index) => (
                   <div
-                    key={`${file.name}-${index}`}
+                    key={`selected-${file.name}-${index}`}
                     className="flex items-center gap-2 bg-muted px-3 py-2 rounded-lg text-sm"
                   >
                     <div className="flex items-center gap-1">
@@ -667,6 +729,30 @@ export function ChatBot() {
                       onClick={() => {
                         setSelectedFiles(prev => prev.filter((_, i) => i !== index));
                       }}
+                    >
+                      <X className="h-3 w-3" />
+                    </Button>
+                  </div>
+                ))}
+
+                {/* Uploaded Files */}
+                {uploadedFiles.map((uploadedFile) => (
+                  <div
+                    key={`uploaded-${uploadedFile.id}`}
+                    className="flex items-center gap-2 bg-green-100 dark:bg-green-900 px-3 py-2 rounded-lg text-sm"
+                  >
+                    <div className="flex items-center gap-1">
+                      {uploadedFile.type === 'image' && <Image className="h-4 w-4" />}
+                      {uploadedFile.type === 'audio' && <Music className="h-4 w-4" />}
+                      {uploadedFile.type === 'video' && <Video className="h-4 w-4" />}
+                      {uploadedFile.type === 'document' && <File className="h-4 w-4" />}
+                    </div>
+                    <span className="truncate max-w-32">{uploadedFile.file.name}</span>
+                    <Button
+                      variant="ghost"
+                      size="icon"
+                      className="h-4 w-4 p-0"
+                      onClick={() => handleFileRemove(uploadedFile.id)}
                     >
                       <X className="h-3 w-3" />
                     </Button>
@@ -720,7 +806,7 @@ export function ChatBot() {
               {/* Send Button */}
               <Button
                 onClick={handleSendMessage}
-                disabled={(!input.trim() && selectedFiles.length === 0) || isLoading}
+                disabled={(!input.trim() && selectedFiles.length === 0 && uploadedFiles.length === 0) || isLoading}
                 size="icon"
                 className="shrink-0 h-[60px] w-12"
               >

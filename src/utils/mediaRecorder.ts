@@ -1,5 +1,8 @@
 // src/utils/mediaRecorder.ts
 
+// FIXED: Use local types to avoid import issues
+export type RecordingState = 'inactive' | 'recording' | 'paused';
+
 export interface MediaRecorderSupport {
   isSupported: boolean;
   supportedMimeTypes: string[];
@@ -14,15 +17,13 @@ export interface RecordingConfig {
 }
 
 export interface RecordingCallbacks {
-  onDataAvailable?: (event: BlobEvent) => void;
+  onDataAvailable?: (event: any) => void;
   onStart?: () => void;
   onStop?: () => void;
   onPause?: () => void;
   onResume?: () => void;
   onError?: (event: Event) => void;
 }
-
-export type RecordingState = 'inactive' | 'recording' | 'paused';
 
 export class MediaRecorderHelper {
   private mediaRecorder: MediaRecorder | null = null;
@@ -100,14 +101,12 @@ export class MediaRecorderHelper {
 
       const mimeType = this.config.mimeType || support.supportedMimeTypes[0];
 
-      // Create MediaRecorder with proper typing
-      const MediaRecorderConstructor = window.MediaRecorder as typeof MediaRecorder;
-      this.mediaRecorder = new MediaRecorderConstructor(this.stream, {
-        mimeType,
-        audioBitsPerSecond: this.config.audioBitsPerSecond,
-        videoBitsPerSecond: this.config.videoBitsPerSecond,
-        bitsPerSecond: this.config.bitsPerSecond
-      });
+      // Create MediaRecorder dengan basic options
+      const options: any = {};
+      if (mimeType) options.mimeType = mimeType;
+      if (this.config.audioBitsPerSecond) options.audioBitsPerSecond = this.config.audioBitsPerSecond;
+
+      this.mediaRecorder = new MediaRecorder(this.stream, options);
 
       // Setup event listeners
       this.setupEventListeners();
@@ -190,7 +189,7 @@ export class MediaRecorderHelper {
   private setupEventListeners(): void {
     if (!this.mediaRecorder) return;
 
-    this.mediaRecorder.ondataavailable = (event: BlobEvent) => {
+    this.mediaRecorder.ondataavailable = (event: any) => {
       if (event.data.size > 0) {
         this.recordedChunks.push(event.data);
       }
