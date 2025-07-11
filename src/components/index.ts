@@ -29,7 +29,7 @@ export { Logo } from './Logo';
 export { ThemeToggle } from './ThemeToggle';
 
 // Legacy Components (if still needed)
-export { FileUpload } from './FileUpload';
+export { SmartFileUpload } from './FileUpload';
 export { LoginDialog } from './LoginDialog';
 
 // UI Components Re-exports
