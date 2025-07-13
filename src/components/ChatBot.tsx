@@ -58,14 +58,11 @@ import { LoadingDots } from './LoadingDots';
 import Logo from './Logo';
 import { ThemeToggle } from './ThemeToggle';
 import { CompactSettingsDialog } from './SettingsDialog';
-import { VoiceInput, SpeechButton } from './VoiceInput';
 import FixedChatSidebar from './ChatSidebar';
-import MultimodalUpload from './MultimodalUpload';
 import { MessageWithContinue } from './ContinueButton';
 import { TrendingCards } from './TrendingCards';
 import { LoginDialog } from './LoginDialog';
 import EnhancedTextarea from './EnhancedTextarea';
-import SmartFileUpload from './FileUpload';
 
 // Context and Utilities
 import { useAuth } from '@/context/AuthContext';
@@ -615,17 +612,6 @@ export const ChatBot: React.FC = () => {
               showText={false}
               className="sm:hidden"
             />
-
-            {/* New Chat Button */}
-            <Button
-              variant="outline"
-              size="sm"
-              onClick={handleNewSession}
-              className="hidden md:flex items-center gap-2 ml-2"
-            >
-              <Plus className="h-3 w-3" />
-              New Chat
-            </Button>
           </div>
 
           {/* Center - Voice Controls (Optional) */}
@@ -775,7 +761,7 @@ export const ChatBot: React.FC = () => {
                   className="text-center py-12"
                 >
                   <Bot className="w-16 h-16 mx-auto mb-4 text-primary" />
-                  <h2 className="text-2xl font-bold mb-2">Welcome to AI Assistant</h2>
+                  <h2 className="text-2xl font-bold mb-2">Welcome to AI Chat</h2>
                   <p className="text-muted-foreground mb-6">
                     Start a conversation by typing a message, uploading a file, or using voice input
                   </p>
@@ -903,24 +889,9 @@ export const ChatBot: React.FC = () => {
 
             {/* FIXED: Input Form with ALL features visible */}
             <div className="flex items-end gap-2">
-              {/* FIXED: File Upload Button - ALWAYS VISIBLE */}
-              <div className="flex flex-col gap-1">
-                <SmartFileUpload
-                  files={files}
-                  onFilesChange={setFiles}
-                  onFileAdd={handleFileAdd}
-                  onFileRemove={handleRemoveFile}
-                  maxFiles={5}
-                  maxFileSize={10 * 1024 * 1024} // 10MB
-                  isCompact={true}
-                  showUploadArea={false}
-                  autoCollapse={false}
-                />
-              </div>
-
               {/* Text Input */}
               <div className="flex-1">
-                <EnhancedTextarea
+                  <EnhancedTextarea
                   value={input}
                   onChange={setInput}
                   onSend={handleSendMessage}
@@ -934,9 +905,35 @@ export const ChatBot: React.FC = () => {
                   disabled={isLoading}
                   isLoading={isLoading}
                   showSendButton={false}
-                  className="min-h-[44px] max-h-32"
+                  className="min-h-[44px] max-h-32 resize-none"
+                  style={{ height: '44px' }}
                 />
               </div>
+
+              {/* FIXED: File Upload Button - Next to Voice/Send */}
+              <Button
+                variant="outline"
+                size="icon"
+                onClick={() => {
+                  // Trigger file upload
+                  const fileInput = document.createElement('input');
+                  fileInput.type = 'file';
+                  fileInput.multiple = true;
+                  fileInput.accept = 'image/*,video/*,audio/*,application/pdf,text/*';
+                  fileInput.onchange = (e) => {
+                    const files = (e.target as HTMLInputElement).files;
+                    if (files) {
+                      handleFileAdd(Array.from(files));
+                    }
+                  };
+                  fileInput.click();
+                }}
+                disabled={isLoading}
+                className="h-11 w-11 shrink-0"
+                title="Upload files"
+              >
+                <Paperclip className="h-4 w-4" />
+              </Button>
 
               {/* Voice Button */}
               <Button
