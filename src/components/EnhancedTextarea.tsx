@@ -8,7 +8,8 @@ import { Badge } from './ui/badge';
 import { cn } from '@/lib/utils';
 import { useEnhancedInput } from '@/hooks/useEnhancedInput';
 
-interface EnhancedTextareaProps {
+// FIXED: Extend interface untuk mendukung semua HTML textarea attributes termasuk style
+interface EnhancedTextareaProps extends Omit<React.TextareaHTMLAttributes<HTMLTextAreaElement>, 'onChange' | 'onSend' | 'value'> {
   value?: string;
   onChange?: (value: string) => void;
   onSend?: (message: string) => void;
@@ -22,6 +23,8 @@ interface EnhancedTextareaProps {
   autoResize?: boolean;
   minHeight?: number;
   maxHeight?: number;
+  // FIXED: Eksplisit menambahkan style prop support
+  style?: React.CSSProperties;
 }
 
 export const EnhancedTextarea = forwardRef<HTMLTextAreaElement, EnhancedTextareaProps>(
@@ -39,6 +42,8 @@ export const EnhancedTextarea = forwardRef<HTMLTextAreaElement, EnhancedTextarea
     autoResize = true,
     minHeight = 60,
     maxHeight = 120,
+    style, // FIXED: Destructure style prop
+    ...htmlProps // FIXED: Spread remaining HTML props
   }, ref) => {
     const {
       value,
@@ -110,6 +115,13 @@ export const EnhancedTextarea = forwardRef<HTMLTextAreaElement, EnhancedTextarea
       }
     };
 
+    // FIXED: Combine inline styles properly
+    const combinedStyle: React.CSSProperties = {
+      minHeight: `${minHeight}px`,
+      maxHeight: `${maxHeight}px`,
+      ...style // FIXED: Merge with passed style prop
+    };
+
     return (
       <div className="relative">
         <div
@@ -123,7 +135,8 @@ export const EnhancedTextarea = forwardRef<HTMLTextAreaElement, EnhancedTextarea
         >
           {/* Main Textarea */}
           <textarea
-            ref={textareaRef}
+            {...htmlProps} // FIXED: Spread all HTML attributes
+            ref={ref || textareaRef} // FIXED: Use forwarded ref if provided
             value={displayValue}
             onChange={handleValueChange}
             onKeyDown={handleKeyDown}
@@ -140,10 +153,7 @@ export const EnhancedTextarea = forwardRef<HTMLTextAreaElement, EnhancedTextarea
               "disabled:cursor-not-allowed disabled:opacity-50",
               showSendButton ? "pr-12" : "pr-3"
             )}
-            style={{
-              minHeight: `${minHeight}px`,
-              maxHeight: `${maxHeight}px`,
-            }}
+            style={combinedStyle} // FIXED: Apply combined styles
             rows={1}
           />
 
