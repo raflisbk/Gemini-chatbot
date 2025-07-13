@@ -4,11 +4,10 @@ import React from 'react';
 import { Dialog, DialogContent } from './ui/dialog';
 import LoginForm from './LoginForm';
 
-// FIXED: Updated interface to match actual usage
 export interface LoginDialogProps {
   isOpen: boolean;
   onClose: () => void;
-  onSuccess?: () => void;        // FIXED: Made optional
+  onSuccess?: () => void;
   showGuestOption?: boolean;
   className?: string;
 }
@@ -25,11 +24,20 @@ export const LoginDialog: React.FC<LoginDialogProps> = ({
     onClose();      // Always close dialog on success
   };
 
+  // FIXED: Handle dialog close properly
+  const handleOpenChange = (open: boolean) => {
+    if (!open) {
+      onClose();
+    }
+  };
+
   return (
-    <Dialog open={isOpen} onOpenChange={onClose}>
-      <DialogContent className={`max-w-md p-0 ${className}`}>
+    <Dialog open={isOpen} onOpenChange={handleOpenChange}>
+      {/* FIXED: Remove custom className from DialogContent to avoid conflicts */}
+      {/* FIXED: Use proper padding and max-width */}
+      <DialogContent className="max-w-md p-6 sm:p-8">
+        {/* FIXED: Remove onCancel prop since dialog handles close automatically */}
         <LoginForm
-          onCancel={onClose}
           onSuccess={handleSuccess}
           showGuestOption={showGuestOption}
           embedded={true}

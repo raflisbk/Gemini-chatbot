@@ -19,20 +19,19 @@ import {
 
 import { Button } from './ui/button';
 import { Badge } from './ui/badge';
-import Logo from './Logo'; // FIXED: Default import
+import Logo from './Logo';
 import { ThemeToggle } from './ThemeToggle';
 import { useAuth } from '@/context/AuthContext';
 
-// FIXED: Updated interface to match actual usage
 export interface EnhancedNavbarProps {
-  onHomeClick?: () => void;           // FIXED: Changed from onMenuClick
+  onHomeClick?: () => void;
   onSettingsClick?: () => void;
   onLoginClick?: () => void;
-  onNewChat?: () => void;             // FIXED: Changed from onNewSession
-  onVoiceToggle?: () => void;         // Optional voice features
-  onSpeechToggle?: () => void;        // Optional speech features
-  isVoiceActive?: boolean;            // Optional voice state
-  isSpeechEnabled?: boolean;          // Optional speech state
+  onNewChat?: () => void;
+  onVoiceToggle?: () => void;
+  onSpeechToggle?: () => void;
+  isVoiceActive?: boolean;
+  isSpeechEnabled?: boolean;
   className?: string;
 }
 
@@ -49,6 +48,11 @@ export const EnhancedNavbar: React.FC<EnhancedNavbarProps> = ({
 }) => {
   const { user, isGuest, isAdmin } = useAuth();
 
+  // ========================================
+  // FIXED: Settings access control logic
+  // ========================================
+  const canAccessSettings = user && !isGuest; // Only authenticated non-guest users can access settings
+
   return (
     <motion.nav
       initial={{ y: -10, opacity: 0 }}
@@ -64,7 +68,7 @@ export const EnhancedNavbar: React.FC<EnhancedNavbarProps> = ({
             size="icon"
             onClick={onHomeClick}
             className="md:hidden"
-            title="Open menu"
+            title="Toggle sidebar"
           >
             <Menu className="h-4 w-4" />
           </Button>
@@ -196,8 +200,8 @@ export const EnhancedNavbar: React.FC<EnhancedNavbarProps> = ({
         {/* Theme Toggle */}
         <ThemeToggle />
 
-        {/* Settings Button */}
-        {onSettingsClick && (
+        {/* FIXED: Settings Button - Only show for authenticated non-guest users */}
+        {onSettingsClick && canAccessSettings && (
           <Button
             variant="ghost"
             size="icon"
@@ -206,6 +210,21 @@ export const EnhancedNavbar: React.FC<EnhancedNavbarProps> = ({
           >
             <Settings className="h-4 w-4" />
           </Button>
+        )}
+
+        {/* FIXED: Guest notification - Optional: Show why settings is not available */}
+        {isGuest && onSettingsClick && (
+          <div className="hidden sm:block">
+            <Button
+              variant="ghost"
+              size="icon"
+              disabled
+              title="Settings not available for guest users. Please sign in to access settings."
+              className="opacity-50 cursor-not-allowed"
+            >
+              <Settings className="h-4 w-4" />
+            </Button>
+          </div>
         )}
       </div>
     </motion.nav>
