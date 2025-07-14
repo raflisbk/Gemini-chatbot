@@ -356,11 +356,12 @@ export const ChatBot: React.FC = () => {
   }), [voiceSupported, speechSupported]);
 
   // ========================================
-  // INPUT & FILE STATE
+  // INPUT & FILE STATE - GEMINI ENHANCED
   // ========================================
   const [input, setInput] = useState('');
   const [files, setFiles] = useState<FileItem[]>([]);
   const [showWelcome, setShowWelcome] = useState(true);
+  const [isFocused, setIsFocused] = useState(false); // NEW: Focus state for Gemini style
   const textareaRef = useRef<HTMLTextAreaElement>(null);
 
   // ========================================
@@ -380,6 +381,17 @@ export const ChatBot: React.FC = () => {
       setInput(prev => prev + transcript);
     }
   }, [transcript]);
+
+  // Auto-resize textarea for Gemini style
+  useEffect(() => {
+    const textarea = textareaRef.current;
+    if (textarea) {
+      textarea.style.height = 'auto';
+      const scrollHeight = textarea.scrollHeight;
+      const maxHeight = 200;
+      textarea.style.height = `${Math.min(scrollHeight, maxHeight)}px`;
+    }
+  }, [input]);
 
   // ========================================
   // EVENT HANDLERS
@@ -405,6 +417,7 @@ export const ChatBot: React.FC = () => {
 
       setInput('');
       setFiles([]);
+      setIsFocused(false); // Reset focus state after send
       updateUsage('message');
     } catch (error) {
       console.error('Failed to send message:', error);
@@ -859,136 +872,356 @@ export const ChatBot: React.FC = () => {
           </ScrollArea>
         </div>
 
-        {/* FIXED: Input Area with ALL upload features */}
+        {/* ========================================
+           GEMINI STYLE INPUT AREA - ENHANCED
+           ======================================== */}
         <div className="border-t border-border bg-card/50 backdrop-blur-sm p-4">
           <div className="max-w-4xl mx-auto">
-            {/* File Attachments Preview */}
+            {/* Enhanced File Attachments Preview */}
             {files.length > 0 && (
-              <div className="mb-4">
-                <div className="flex flex-wrap gap-2">
-                  {files.map((file) => (
-                    <div key={file.id} className="flex items-center gap-2 bg-muted px-3 py-2 rounded-lg">
-                      {file.type === 'image' && <Image className="h-4 w-4" />}
-                      {file.type === 'video' && <Video className="h-4 w-4" />}
-                      {file.type === 'audio' && <Music className="h-4 w-4" />}
-                      {file.type === 'document' && <File className="h-4 w-4" />}
-                      <span className="text-sm">{file.file.name}</span>
+              <motion.div
+                initial={{ height: 0, opacity: 0 }}
+                animate={{ height: 'auto', opacity: 1 }}
+                exit={{ height: 0, opacity: 0 }}
+                transition={{ duration: 0.2 }}
+                className="mb-4 overflow-hidden"
+              >
+                <div className="flex flex-wrap gap-2 p-3 bg-secondary/20 rounded-2xl border border-border/50">
+                  {files.map((file, index) => (
+                    <motion.div
+                      key={file.id}
+                      initial={{ scale: 0, opacity: 0 }}
+                      animate={{ scale: 1, opacity: 1 }}
+                      exit={{ scale: 0, opacity: 0 }}
+                      transition={{ 
+                        delay: index * 0.05, 
+                        type: "spring", 
+                        stiffness: 300,
+                        damping: 25 
+                      }}
+                      className="flex items-center gap-2 bg-background/80 backdrop-blur-sm px-3 py-2 rounded-xl border border-border/30 shadow-sm hover:shadow-md transition-all duration-200 group"
+                    >
+                      <div className="flex items-center gap-2">
+                        {file.type === 'image' && <Image className="h-4 w-4 text-blue-500" />}
+                        {file.type === 'video' && <Video className="h-4 w-4 text-purple-500" />}
+                        {file.type === 'audio' && <Music className="h-4 w-4 text-green-500" />}
+                        {file.type === 'document' && <File className="h-4 w-4 text-orange-500" />}
+                        <span className="text-sm font-medium truncate max-w-[120px]">
+                          {file.file.name}
+                        </span>
+                      </div>
                       <Button
                         variant="ghost"
                         size="icon"
-                        className="h-5 w-5"
+                        className="h-5 w-5 rounded-full hover:bg-destructive/20 hover:text-destructive transition-all duration-150 opacity-70 group-hover:opacity-100"
                         onClick={() => handleRemoveFile(file.id)}
                       >
                         <X className="h-3 w-3" />
                       </Button>
-                    </div>
+                    </motion.div>
                   ))}
                 </div>
-              </div>
-            )}
-
-            {/* FIXED: Input Form with ALL features visible */}
-            <div className="flex items-end gap-2">
-              {/* Text Input */}
-              <div className="flex-1">
-                  <EnhancedTextarea
-                  value={input}
-                  onChange={setInput}
-                  onSend={handleSendMessage}
-                  placeholder={
-                    isListening 
-                      ? "Listening... or type your message"
-                      : support.speechRecognition 
-                        ? "Type your message or use voice input..."
-                        : "Type your message..."
-                  }
-                  disabled={isLoading}
-                  isLoading={isLoading}
-                  showSendButton={false}
-                  className="min-h-[44px] max-h-32 resize-none"
-                  style={{ height: '44px' }}
-                />
-              </div>
-
-              {/* FIXED: File Upload Button - Next to Voice/Send */}
-              <Button
-                variant="outline"
-                size="icon"
-                onClick={() => {
-                  // Trigger file upload
-                  const fileInput = document.createElement('input');
-                  fileInput.type = 'file';
-                  fileInput.multiple = true;
-                  fileInput.accept = 'image/*,video/*,audio/*,application/pdf,text/*';
-                  fileInput.onchange = (e) => {
-                    const files = (e.target as HTMLInputElement).files;
-                    if (files) {
-                      handleFileAdd(Array.from(files));
-                    }
-                  };
-                  fileInput.click();
-                }}
-                disabled={isLoading}
-                className="h-11 w-11 shrink-0"
-                title="Upload files"
-              >
-                <Paperclip className="h-4 w-4" />
-              </Button>
-
-              {/* Voice Button */}
-              <Button
-                variant={isListening ? "default" : "outline"}
-                size="icon"
-                onClick={handleVoiceToggle}
-                disabled={!support.speechRecognition || isLoading}
-                className="h-11 w-11 shrink-0"
-                title={isListening ? "Stop listening" : "Start voice input"}
-              >
-                {isListening ? <MicOff className="h-4 w-4" /> : <Mic className="h-4 w-4" />}
-              </Button>
-
-              {/* Send Button */}
-              <Button
-                onClick={() => handleSendMessage()}
-                disabled={(!input.trim() && files.length === 0) || isLoading || !canSendMessage()}
-                className="h-11 px-4 shrink-0"
-                title="Send message"
-              >
-                {isLoading ? (
-                  <Loader2 className="h-4 w-4 animate-spin" />
-                ) : (
-                  <Send className="h-4 w-4" />
-                )}
-              </Button>
-            </div>
-
-            {/* FIXED: Voice status indicator */}
-            {isListening && (
-              <motion.div 
-                initial={{ opacity: 0, y: 5 }}
-                animate={{ opacity: 1, y: 0 }}
-                exit={{ opacity: 0, y: 5 }}
-                transition={{ duration: 0.2 }}
-                className="mt-3 flex items-center gap-2 text-sm text-muted-foreground"
-              >
-                <motion.div 
-                  className="w-2 h-2 bg-red-500 rounded-full"
-                  animate={{ scale: [1, 1.2, 1] }}
-                  transition={{ repeat: Infinity, duration: 1, ease: "easeInOut" }}
-                />
-                <span>Listening... Speak now or press ESC to cancel</span>
               </motion.div>
             )}
 
-            {/* FIXED: Sidebar status indicator for desktop */}
-            {isDesktop && !showSidebar && (
+            {/* GEMINI STYLE: Compact/Expandable Input Container */}
+            <motion.div
+              className={cn(
+                "relative bg-background/95 backdrop-blur-md border border-border/80 rounded-3xl shadow-lg transition-all duration-300 ease-out overflow-hidden",
+                "hover:border-primary/30 hover:shadow-xl",
+                (isFocused || input.length > 0 || files.length > 0) 
+                  ? "shadow-2xl border-primary/50 ring-2 ring-primary/10" 
+                  : "shadow-md"
+              )}
+              animate={{
+                height: (isFocused || input.length > 0 || files.length > 0) ? "auto" : "56px",
+                scale: (isFocused || input.length > 0 || files.length > 0) ? 1.01 : 1
+              }}
+              transition={{ 
+                type: "spring", 
+                stiffness: 300, 
+                damping: 30,
+                duration: 0.3
+              }}
+            >
+              {/* Inner Container */}
+              <div className="relative flex items-start p-3">
+                
+                {/* Left Actions - Add Button */}
+                <div className="flex items-center mr-3">
+                  <motion.div
+                    whileTap={{ scale: 0.95 }}
+                    className="relative"
+                  >
+                    <Button
+                      variant="ghost"
+                      size="icon"
+                      className={cn(
+                        "rounded-full hover:bg-secondary/80 transition-all duration-200",
+                        (isFocused || input.length > 0) ? "h-8 w-8" : "h-10 w-10"
+                      )}
+                      onClick={() => {
+                        const fileInput = document.createElement('input');
+                        fileInput.type = 'file';
+                        fileInput.multiple = true;
+                        fileInput.accept = 'image/*,video/*,audio/*,application/pdf,text/*';
+                        fileInput.onchange = (e) => {
+                          const files = (e.target as HTMLInputElement).files;
+                          if (files) {
+                            handleFileAdd(Array.from(files));
+                          }
+                        };
+                        fileInput.click();
+                      }}
+                      disabled={isLoading}
+                      title="Upload files"
+                    >
+                      <Plus className="h-5 w-5" />
+                    </Button>
+                  </motion.div>
+                </div>
+
+                {/* Center - Textarea and Quick Actions */}
+                <div className="flex-1 relative">
+                  
+                  {/* Quick Action Chips - Visible when not focused */}
+                  <AnimatePresence>
+                    {!isFocused && input.length === 0 && files.length === 0 && (
+                      <motion.div
+                        initial={{ opacity: 0, y: 5 }}
+                        animate={{ opacity: 1, y: 0 }}
+                        exit={{ opacity: 0, y: -5 }}
+                        transition={{ duration: 0.2 }}
+                        className="flex items-center gap-2 mb-2"
+                      >
+                        <Button
+                          variant="ghost"
+                          size="sm"
+                          className="h-8 px-3 rounded-full bg-secondary/50 hover:bg-secondary/80 text-xs font-medium"
+                          onClick={() => {
+                            setInput("Bantu saya dengan penelitian mendalam tentang ");
+                            setIsFocused(true);
+                            textareaRef.current?.focus();
+                          }}
+                        >
+                          <Search className="h-3 w-3 mr-1" />
+                          Deep Research
+                        </Button>
+                        <Button
+                          variant="ghost"
+                          size="sm"
+                          className="h-8 px-3 rounded-full bg-secondary/50 hover:bg-secondary/80 text-xs font-medium"
+                          onClick={() => {
+                            setInput("Buatkan canvas untuk ");
+                            setIsFocused(true);
+                            textareaRef.current?.focus();
+                          }}
+                        >
+                          <FileText className="h-3 w-3 mr-1" />
+                          Canvas
+                        </Button>
+                      </motion.div>
+                    )}
+                  </AnimatePresence>
+
+                  {/* Main Textarea */}
+                  <div className="relative">
+                    <textarea
+                      ref={textareaRef}
+                      value={input}
+                      onChange={(e) => setInput(e.target.value)}
+                      onFocus={() => setIsFocused(true)}
+                      onBlur={() => setIsFocused(false)}
+                      onKeyDown={(e) => {
+                        if (e.key === 'Enter' && !e.shiftKey) {
+                          e.preventDefault();
+                          if ((input.trim() || files.length > 0) && canSendMessage()) {
+                            handleSendMessage();
+                          }
+                        }
+                        if (e.key === 'Escape') {
+                          setIsFocused(false);
+                          textareaRef.current?.blur();
+                        }
+                      }}
+                      placeholder={
+                        isListening 
+                          ? "🎤 Listening... atau ketik pesan"
+                          : isFocused || input.length > 0 || files.length > 0
+                            ? "Type your message or use voice input..."
+                            : "Minta Gemini"
+                      }
+                      disabled={isLoading}
+                      className={cn(
+                        "w-full resize-none border-0 bg-transparent text-sm leading-relaxed",
+                        "placeholder:text-muted-foreground/70 focus:outline-none pr-16",
+                        "transition-all duration-200",
+                        (isFocused || input.length > 0 || files.length > 0) 
+                          ? "min-h-[80px] max-h-[200px] py-2" 
+                          : "h-8 py-1 overflow-hidden",
+                        isListening && "placeholder:text-red-500/70"
+                      )}
+                      style={{ 
+                        lineHeight: '1.5',
+                        scrollbarWidth: 'thin',
+                        scrollbarColor: 'transparent transparent'
+                      }}
+                    />
+
+                    {/* Character Counter - Compact */}
+                    {input.length > 3500 && (
+                      <motion.div
+                        initial={{ opacity: 0, scale: 0.9 }}
+                        animate={{ opacity: 1, scale: 1 }}
+                        className="absolute bottom-1 right-16 text-xs text-muted-foreground bg-background/90 backdrop-blur-sm px-2 py-1 rounded-full border border-border/50"
+                      >
+                        {input.length}/4000
+                      </motion.div>
+                    )}
+                  </div>
+                </div>
+
+                {/* Right Actions - Voice & Send */}
+                <div className="flex items-start gap-1 ml-2">
+                  
+                  {/* Voice Button */}
+                  {support.speechRecognition && (
+                    <motion.div whileTap={{ scale: 0.95 }}>
+                      <Button
+                        variant="ghost"
+                        size="icon"
+                        onClick={handleVoiceToggle}
+                        disabled={isLoading}
+                        className={cn(
+                          "rounded-full transition-all duration-200",
+                          (isFocused || input.length > 0 || files.length > 0) ? "h-8 w-8" : "h-10 w-10",
+                          isListening 
+                            ? "bg-red-500 hover:bg-red-600 text-white shadow-lg" 
+                            : "hover:bg-secondary/80"
+                        )}
+                        title={isListening ? "Stop listening" : "Start voice input"}
+                      >
+                        {isListening ? (
+                          <motion.div
+                            animate={{ scale: [1, 1.1, 1] }}
+                            transition={{ repeat: Infinity, duration: 1.5, ease: "easeInOut" }}
+                          >
+                            <MicOff className="h-4 w-4" />
+                          </motion.div>
+                        ) : (
+                          <Mic className="h-4 w-4" />
+                        )}
+                      </Button>
+                    </motion.div>
+                  )}
+
+                  {/* Send Button - Only visible when ready to send */}
+                  <AnimatePresence>
+                    {(input.trim() || files.length > 0) && canSendMessage() && !isLoading && (
+                      <motion.div
+                        initial={{ scale: 0, opacity: 0 }}
+                        animate={{ scale: 1, opacity: 1 }}
+                        exit={{ scale: 0, opacity: 0 }}
+                        transition={{ 
+                          type: "spring", 
+                          stiffness: 500, 
+                          damping: 30 
+                        }}
+                        whileTap={{ scale: 0.95 }}
+                      >
+                        <Button
+                          onClick={() => handleSendMessage()}
+                          disabled={isLoading}
+                          className={cn(
+                            "rounded-full font-medium transition-all duration-200",
+                            "bg-primary hover:bg-primary/90 text-primary-foreground shadow-lg hover:shadow-xl",
+                            (isFocused || input.length > 0 || files.length > 0) ? "h-8 w-8 p-0" : "h-10 w-10 p-0"
+                          )}
+                          title="Send message"
+                        >
+                          <Send className="h-4 w-4" />
+                        </Button>
+                      </motion.div>
+                    )}
+                  </AnimatePresence>
+
+                  {/* Loading State */}
+                  {isLoading && (
+                    <motion.div
+                      initial={{ scale: 0, opacity: 0 }}
+                      animate={{ scale: 1, opacity: 1 }}
+                      className="flex items-center justify-center h-8 w-8"
+                    >
+                      <Loader2 className="h-4 w-4 animate-spin text-primary" />
+                    </motion.div>
+                  )}
+                </div>
+              </div>
+
+              {/* Bottom Helper Text */}
+              <AnimatePresence>
+                {(isFocused || input.length > 0 || files.length > 0) && (
+                  <motion.div
+                    initial={{ height: 0, opacity: 0 }}
+                    animate={{ height: "auto", opacity: 1 }}
+                    exit={{ height: 0, opacity: 0 }}
+                    transition={{ duration: 0.2 }}
+                    className="px-4 pb-3 pt-1 overflow-hidden"
+                  >
+                    <div className="flex items-center justify-between text-xs text-muted-foreground/60">
+                      <span>Press Enter to send, Shift+Enter for new line</span>
+                      <span>{input.length}/4000</span>
+                    </div>
+                  </motion.div>
+                )}
+              </AnimatePresence>
+            </motion.div>
+
+            {/* Voice Status Indicator - Enhanced */}
+            <AnimatePresence>
+              {isListening && (
+                <motion.div 
+                  initial={{ opacity: 0, y: 10 }}
+                  animate={{ opacity: 1, y: 0 }}
+                  exit={{ opacity: 0, y: 10 }}
+                  transition={{ duration: 0.2 }}
+                  className="mt-4 flex items-center justify-center gap-3 p-3 bg-red-500/10 rounded-2xl border border-red-500/20"
+                >
+                  <div className="flex items-center gap-2">
+                    <motion.div 
+                      className="w-2 h-2 bg-red-500 rounded-full"
+                      animate={{ scale: [1, 1.3, 1] }}
+                      transition={{ repeat: Infinity, duration: 1.5, ease: "easeInOut" }}
+                    />
+                    <motion.div 
+                      className="w-2 h-2 bg-red-500 rounded-full"
+                      animate={{ scale: [1, 1.3, 1] }}
+                      transition={{ repeat: Infinity, duration: 1.5, ease: "easeInOut", delay: 0.2 }}
+                    />
+                    <motion.div 
+                      className="w-2 h-2 bg-red-500 rounded-full"
+                      animate={{ scale: [1, 1.3, 1] }}
+                      transition={{ repeat: Infinity, duration: 1.5, ease: "easeInOut", delay: 0.4 }}
+                    />
+                  </div>
+                  <span className="text-sm font-medium text-red-600 dark:text-red-400">
+                    Listening... Speak now or press ESC to cancel
+                  </span>
+                </motion.div>
+              )}
+            </AnimatePresence>
+
+            {/* Desktop Sidebar Indicator - Only when not focused */}
+            {isDesktop && !showSidebar && !isFocused && input.length === 0 && (
               <motion.div 
                 initial={{ opacity: 0 }}
                 animate={{ opacity: 1 }}
-                transition={{ delay: 2, duration: 0.3 }}
-                className="mt-3 flex items-center gap-2 text-xs text-muted-foreground/50"
+                transition={{ delay: 3, duration: 0.3 }}
+                className="mt-4 text-center"
               >
-                <span>💡 Press Ctrl+B or click the menu button to toggle sidebar</span>
+                <p className="text-xs text-muted-foreground/50">
+                  💡 Press Ctrl+B or click the menu button to toggle sidebar
+                </p>
               </motion.div>
             )}
           </div>
