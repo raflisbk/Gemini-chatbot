@@ -13,7 +13,10 @@ import {
   User,
   Crown,
   Shield,
-  Loader2
+  Loader2,
+  History,
+  Settings,
+  Bot
 } from 'lucide-react';
 
 import { Button } from './ui/button';
@@ -21,7 +24,6 @@ import { Input } from './ui/input';
 import { ScrollArea } from './ui/scroll-area';
 import { Badge } from './ui/badge';
 import { Card, CardContent } from './ui/card';
-import Logo from './Logo';
 
 // FIXED: Complete interface matching the expected props
 export interface FixedChatSidebarProps {
@@ -31,11 +33,11 @@ export interface FixedChatSidebarProps {
   onSessionDelete: (sessionId: string) => void;
   onNewSession: () => void;
   onClose: () => void;
-  isOpen: boolean;          // FIXED: Added missing property
-  isLoading?: boolean;      // FIXED: Added missing property
-  user?: any;               // Optional user data
-  profile?: any;            // Optional profile data
-  isGuest?: boolean;        // Optional guest status
+  isOpen: boolean;
+  isLoading?: boolean;
+  user?: any;
+  profile?: any;
+  isGuest?: boolean;
 }
 
 interface ChatSession {
@@ -125,188 +127,169 @@ const FixedChatSidebar: React.FC<FixedChatSidebarProps> = ({
   };
 
   return (
-    <AnimatePresence>
-      {isOpen && (
-        <>
-          {/* Backdrop */}
-          <motion.div
-            initial={{ opacity: 0 }}
-            animate={{ opacity: 1 }}
-            exit={{ opacity: 0 }}
-            className="fixed inset-0 bg-background/80 backdrop-blur-sm z-40 md:hidden"
+    <div className="h-full flex flex-col bg-card">
+      {/* FIXED: Header tanpa duplikasi logo */}
+      <div className="p-4 border-b border-border">
+        <div className="flex items-center justify-between mb-4">
+          {/* FIXED: Simple title tanpa logo untuk menghindari duplikasi */}
+          <div className="flex items-center gap-2">
+            <History className="h-5 w-5 text-primary" />
+            <h2 className="text-lg font-semibold">Chat History</h2>
+          </div>
+          
+          {/* Close button untuk mobile */}
+          <Button
+            variant="ghost"
+            size="icon"
             onClick={onClose}
-          />
-
-          {/* Sidebar */}
-          <motion.div
-            initial={{ x: -320, opacity: 0 }}
-            animate={{ x: 0, opacity: 1 }}
-            exit={{ x: -320, opacity: 0 }}
-            transition={{ type: "spring", damping: 30, stiffness: 300 }}
-            className="fixed left-0 top-0 bottom-0 w-80 bg-card border-r border-border z-50 flex flex-col"
+            className="h-8 w-8 lg:hidden"
+            title="Close sidebar"
           >
-            {/* Header */}
-            <div className="p-4 border-b border-border">
-              <div className="flex items-center justify-between mb-4">
-                <Logo size="sm" variant="gradient" showText={true} />
-                <Button
-                  variant="ghost"
-                  size="icon"
-                  onClick={onClose}
-                  className="h-8 w-8"
-                >
-                  <X className="h-4 w-4" />
-                </Button>
+            <X className="h-4 w-4" />
+          </Button>
+        </div>
+
+        {/* FIXED: User Info - Enhanced */}
+        {user && (
+          <div className="flex items-center justify-between mb-4 p-3 bg-secondary/30 rounded-lg">
+            <div className="flex items-center gap-3">
+              <div className="w-10 h-10 rounded-full bg-primary/20 flex items-center justify-center">
+                {user.role === 'admin' ? (
+                  <Crown className="h-5 w-5 text-primary" />
+                ) : isGuest ? (
+                  <User className="h-5 w-5 text-primary" />
+                ) : (
+                  <Shield className="h-5 w-5 text-primary" />
+                )}
               </div>
+              <div className="flex-1 min-w-0">
+                <p className="text-sm font-medium truncate">
+                  {user.email || user.name || 'Anonymous User'}
+                </p>
+                <p className="text-xs text-muted-foreground">
+                  {profile?.quota_used || 0} / {profile?.quota_limit || 25} messages
+                </p>
+              </div>
+            </div>
+            <div className="flex-shrink-0">
+              {getUserStatusBadge()}
+            </div>
+          </div>
+        )}
 
-              {/* User Info */}
-              {user && (
-                <div className="flex items-center justify-between mb-4">
-                  <div className="flex items-center gap-2">
-                    <div className="w-8 h-8 rounded-full bg-primary/20 flex items-center justify-center">
-                      <User className="h-4 w-4 text-primary" />
-                    </div>
-                    <div>
-                      <p className="text-sm font-medium">
-                        {user.email || user.name || 'User'}
-                      </p>
-                      <p className="text-xs text-muted-foreground">
-                        {profile?.quota_used || 0} / {profile?.quota_limit || 25} messages
-                      </p>
-                    </div>
-                  </div>
-                  {getUserStatusBadge()}
-                </div>
-              )}
+        {/* New Chat Button */}
+        <Button
+          onClick={onNewSession}
+          className="w-full flex items-center gap-2"
+          disabled={isLoading}
+        >
+          {isLoading ? (
+            <Loader2 className="h-4 w-4 animate-spin" />
+          ) : (
+            <Plus className="h-4 w-4" />
+          )}
+          New Chat
+        </Button>
+      </div>
 
-              {/* New Chat Button */}
-              <Button
-                onClick={onNewSession}
-                className="w-full flex items-center gap-2"
-                disabled={isLoading}
+      {/* Search */}
+      <div className="p-4 border-b border-border">
+        <div className="relative">
+          <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 h-4 w-4 text-muted-foreground" />
+          <Input
+            placeholder="Search conversations..."
+            value={searchQuery}
+            onChange={(e) => setSearchQuery(e.target.value)}
+            className="pl-9"
+          />
+        </div>
+      </div>
+
+      {/* Chat Sessions */}
+      <ScrollArea className="flex-1">
+        <div className="p-4 space-y-2">
+          {filteredSessions.length === 0 ? (
+            <div className="text-center py-8">
+              <MessageSquare className="h-12 w-12 mx-auto text-muted-foreground/50 mb-3" />
+              <p className="text-sm text-muted-foreground">
+                {searchQuery ? 'No conversations found' : 'No conversations yet'}
+              </p>
+              <p className="text-xs text-muted-foreground mt-1">
+                {searchQuery ? 'Try different keywords' : 'Start a new chat to begin'}
+              </p>
+            </div>
+          ) : (
+            filteredSessions.map((session) => (
+              <Card
+                key={session.id}
+                className={`cursor-pointer transition-all duration-200 group hover:shadow-md ${
+                  currentSessionId === session.id 
+                    ? 'border-primary bg-primary/5 shadow-sm' 
+                    : 'hover:border-primary/50'
+                }`}
+                onClick={() => onSessionSelect(session.id)}
               >
-                {isLoading ? (
-                  <Loader2 className="h-4 w-4 animate-spin" />
-                ) : (
-                  <Plus className="h-4 w-4" />
-                )}
-                New Chat
-              </Button>
-            </div>
-
-            {/* Search */}
-            <div className="p-4 border-b border-border">
-              <div className="relative">
-                <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 h-4 w-4 text-muted-foreground" />
-                <Input
-                  placeholder="Search conversations..."
-                  value={searchQuery}
-                  onChange={(e) => setSearchQuery(e.target.value)}
-                  className="pl-10"
-                />
-              </div>
-            </div>
-
-            {/* Sessions List */}
-            <ScrollArea className="flex-1">
-              <div className="p-2 space-y-1">
-                {isLoading ? (
-                  // Loading State
-                  <div className="flex items-center justify-center py-8">
-                    <div className="flex items-center gap-2 text-muted-foreground">
-                      <Loader2 className="h-4 w-4 animate-spin" />
-                      <span className="text-sm">Loading conversations...</span>
+                <CardContent className="p-3">
+                  <div className="flex items-start justify-between">
+                    <div className="flex-1 min-w-0">
+                      <div className="flex items-center gap-2 mb-1">
+                        <MessageSquare className="h-3 w-3 text-muted-foreground flex-shrink-0" />
+                        <h3 className="text-sm font-medium truncate">
+                          {session.title || 'Untitled Chat'}
+                        </h3>
+                      </div>
+                      
+                      <div className="flex items-center gap-2 text-xs text-muted-foreground mb-2">
+                        <Clock className="h-3 w-3" />
+                        <span>{formatDate(session.last_message_at)}</span>
+                        <span>•</span>
+                        <span>{session.message_count} messages</span>
+                      </div>
+                      
+                      {session.context_summary && (
+                        <p className="text-xs text-muted-foreground truncate">
+                          {session.context_summary}
+                        </p>
+                      )}
+                    </div>
+                    
+                    <div className="flex items-center gap-1 ml-2">
+                      {session.is_active && (
+                        <div className="w-2 h-2 bg-primary rounded-full" />
+                      )}
+                      <Button
+                        variant="ghost"
+                        size="icon"
+                        className="h-6 w-6 opacity-0 group-hover:opacity-100 transition-opacity"
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          onSessionDelete(session.id);
+                        }}
+                      >
+                        <Trash2 className="h-3 w-3" />
+                      </Button>
                     </div>
                   </div>
-                ) : filteredSessions.length === 0 ? (
-                  // Empty State
-                  <div className="flex flex-col items-center justify-center py-8 text-center">
-                    <MessageSquare className="h-8 w-8 text-muted-foreground mb-2" />
-                    <p className="text-sm text-muted-foreground mb-1">
-                      {searchQuery ? 'No conversations found' : 'No conversations yet'}
-                    </p>
-                    <p className="text-xs text-muted-foreground">
-                      {searchQuery ? 'Try a different search term' : 'Start a new chat to begin'}
-                    </p>
-                  </div>
-                ) : (
-                  // Sessions List
-                  filteredSessions.map((session) => (
-                    <Card
-                      key={session.id}
-                      className={`cursor-pointer transition-all duration-200 hover:bg-muted/50 ${
-                        currentSessionId === session.id ? 'bg-primary/10 border-primary' : 'border-transparent'
-                      }`}
-                      onClick={() => onSessionSelect(session.id)}
-                    >
-                      <CardContent className="p-3">
-                        <div className="flex items-start justify-between">
-                          <div className="flex-1 min-w-0">
-                            {/* Session Title */}
-                            <p className="text-sm font-medium truncate mb-1">
-                              {session.title || `Chat ${session.id.slice(0, 8)}`}
-                            </p>
-                            
-                            {/* Session Preview */}
-                            {session.context_summary && (
-                              <p className="text-xs text-muted-foreground line-clamp-2 mb-2">
-                                {session.context_summary}
-                              </p>
-                            )}
-                            
-                            {/* Session Meta */}
-                            <div className="flex items-center gap-2">
-                              <Badge variant="outline" className="text-xs">
-                                <MessageSquare className="h-2 w-2 mr-1" />
-                                {session.message_count}
-                              </Badge>
-                              <span className="text-xs text-muted-foreground flex items-center gap-1">
-                                <Clock className="h-2 w-2" />
-                                {formatDate(session.last_message_at)}
-                              </span>
-                            </div>
-                          </div>
+                </CardContent>
+              </Card>
+            ))
+          )}
+        </div>
+      </ScrollArea>
 
-                          {/* Actions */}
-                          <div className="flex items-center gap-1 ml-2">
-                            {session.is_active && (
-                              <div className="w-2 h-2 bg-green-500 rounded-full" />
-                            )}
-                            <Button
-                              variant="ghost"
-                              size="icon"
-                              className="h-6 w-6 opacity-0 group-hover:opacity-100 transition-opacity"
-                              onClick={(e) => {
-                                e.stopPropagation();
-                                onSessionDelete(session.id);
-                              }}
-                            >
-                              <Trash2 className="h-3 w-3" />
-                            </Button>
-                          </div>
-                        </div>
-                      </CardContent>
-                    </Card>
-                  ))
-                )}
-              </div>
-            </ScrollArea>
-
-            {/* Footer */}
-            <div className="p-4 border-t border-border">
-              <div className="flex items-center justify-between text-xs text-muted-foreground">
-                <span>{filteredSessions.length} conversations</span>
-                {user && (
-                  <span>
-                    {isGuest ? 'Guest Mode' : 'Signed In'}
-                  </span>
-                )}
-              </div>
-            </div>
-          </motion.div>
-        </>
-      )}
-    </AnimatePresence>
+      {/* Footer */}
+      <div className="p-4 border-t border-border">
+        <div className="flex items-center justify-between text-xs text-muted-foreground">
+          <span>{filteredSessions.length} conversations</span>
+          {user && (
+            <span className="flex items-center gap-1">
+              <Bot className="h-3 w-3" />
+              {isGuest ? 'Guest Mode' : 'Signed In'}
+            </span>
+          )}
+        </div>
+      </div>
+    </div>
   );
 };
 

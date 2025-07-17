@@ -58,6 +58,7 @@ import { LoadingDots } from './LoadingDots';
 import Logo from './Logo';
 import { ThemeToggle } from './ThemeToggle';
 import { CompactSettingsDialog } from './SettingsDialog';
+// FIXED: Import sidebar component yang sudah diperbaiki
 import FixedChatSidebar from './ChatSidebar';
 import { MessageWithContinue } from './ContinueButton';
 import { TrendingCards } from './TrendingCards';
@@ -538,7 +539,7 @@ export const ChatBot: React.FC = () => {
               />
             )}
             
-            {/* Sidebar Component */}
+            {/* FIXED: Sidebar Component - Tanpa duplikasi logo */}
             <motion.div
               initial={{ 
                 x: isDesktop ? 0 : -320,
@@ -573,6 +574,9 @@ export const ChatBot: React.FC = () => {
                 onClose={closeSidebar}
                 isOpen={true}
                 isLoading={isLoading}
+                user={user}
+                profile={user}
+                isGuest={isGuest}
               />
             </motion.div>
           </>
@@ -610,7 +614,7 @@ export const ChatBot: React.FC = () => {
               </motion.div>
             </Button>
 
-            {/* Logo */}
+            {/* FIXED: Logo - Hanya di navbar untuk menghindari duplikasi */}
             <Logo 
               size="md" 
               variant="gradient"
@@ -873,7 +877,7 @@ export const ChatBot: React.FC = () => {
         </div>
 
         {/* ========================================
-           GEMINI STYLE INPUT AREA - ENHANCED
+           GEMINI STYLE INPUT AREA - ENHANCED WITH DIRECT INPUT
            ======================================== */}
         <div className="border-t border-border bg-card/50 backdrop-blur-sm p-4">
           <div className="max-w-4xl mx-auto">
@@ -924,10 +928,10 @@ export const ChatBot: React.FC = () => {
               </motion.div>
             )}
 
-            {/* GEMINI STYLE: Compact/Expandable Input Container */}
+            {/* GEMINI STYLE: Compact/Expandable Input Container - DIRECT INPUT ENABLED */}
             <motion.div
               className={cn(
-                "relative bg-background/95 backdrop-blur-md border border-border/80 rounded-3xl shadow-lg transition-all duration-300 ease-out overflow-hidden",
+                "relative bg-background/95 backdrop-blur-md border border-border/80 rounded-3xl shadow-lg transition-all duration-300 ease-out overflow-hidden cursor-text",
                 "hover:border-primary/30 hover:shadow-xl",
                 (isFocused || input.length > 0 || files.length > 0) 
                   ? "shadow-2xl border-primary/50 ring-2 ring-primary/10" 
@@ -942,6 +946,11 @@ export const ChatBot: React.FC = () => {
                 stiffness: 300, 
                 damping: 30,
                 duration: 0.3
+              }}
+              onClick={() => {
+                if (!isFocused) {
+                  textareaRef.current?.focus();
+                }
               }}
             >
               {/* Inner Container */}
@@ -960,7 +969,8 @@ export const ChatBot: React.FC = () => {
                         "rounded-full hover:bg-secondary/80 transition-all duration-200",
                         (isFocused || input.length > 0) ? "h-8 w-8" : "h-10 w-10"
                       )}
-                      onClick={() => {
+                      onClick={(e) => {
+                        e.stopPropagation();
                         const fileInput = document.createElement('input');
                         fileInput.type = 'file';
                         fileInput.multiple = true;
@@ -981,50 +991,9 @@ export const ChatBot: React.FC = () => {
                   </motion.div>
                 </div>
 
-                {/* Center - Textarea and Quick Actions */}
+                {/* Center - Direct Textarea Input */}
                 <div className="flex-1 relative">
-                  
-                  {/* Quick Action Chips - Visible when not focused */}
-                  <AnimatePresence>
-                    {!isFocused && input.length === 0 && files.length === 0 && (
-                      <motion.div
-                        initial={{ opacity: 0, y: 5 }}
-                        animate={{ opacity: 1, y: 0 }}
-                        exit={{ opacity: 0, y: -5 }}
-                        transition={{ duration: 0.2 }}
-                        className="flex items-center gap-2 mb-2"
-                      >
-                        <Button
-                          variant="ghost"
-                          size="sm"
-                          className="h-8 px-3 rounded-full bg-secondary/50 hover:bg-secondary/80 text-xs font-medium"
-                          onClick={() => {
-                            setInput("Bantu saya dengan penelitian mendalam tentang ");
-                            setIsFocused(true);
-                            textareaRef.current?.focus();
-                          }}
-                        >
-                          <Search className="h-3 w-3 mr-1" />
-                          Deep Research
-                        </Button>
-                        <Button
-                          variant="ghost"
-                          size="sm"
-                          className="h-8 px-3 rounded-full bg-secondary/50 hover:bg-secondary/80 text-xs font-medium"
-                          onClick={() => {
-                            setInput("Buatkan canvas untuk ");
-                            setIsFocused(true);
-                            textareaRef.current?.focus();
-                          }}
-                        >
-                          <FileText className="h-3 w-3 mr-1" />
-                          Canvas
-                        </Button>
-                      </motion.div>
-                    )}
-                  </AnimatePresence>
-
-                  {/* Main Textarea */}
+                  {/* Main Textarea - Always Accessible */}
                   <div className="relative">
                     <textarea
                       ref={textareaRef}
@@ -1048,8 +1017,8 @@ export const ChatBot: React.FC = () => {
                         isListening 
                           ? "🎤 Listening... atau ketik pesan"
                           : isFocused || input.length > 0 || files.length > 0
-                            ? "Type your message or use voice input..."
-                            : "Minta Gemini"
+                            ? "Type your message here or use voice input..."
+                            : "Ask anything... Click here to start typing"
                       }
                       disabled={isLoading}
                       className={cn(
@@ -1090,7 +1059,10 @@ export const ChatBot: React.FC = () => {
                       <Button
                         variant="ghost"
                         size="icon"
-                        onClick={handleVoiceToggle}
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          handleVoiceToggle();
+                        }}
                         disabled={isLoading}
                         className={cn(
                           "rounded-full transition-all duration-200",
@@ -1130,7 +1102,10 @@ export const ChatBot: React.FC = () => {
                         whileTap={{ scale: 0.95 }}
                       >
                         <Button
-                          onClick={() => handleSendMessage()}
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            handleSendMessage();
+                          }}
                           disabled={isLoading}
                           className={cn(
                             "rounded-full font-medium transition-all duration-200",
