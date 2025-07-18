@@ -1,4 +1,4 @@
-// src/lib/sessionManager.ts - Enhanced session management with real-time support
+// src/lib/sessionManager.ts - FIXED Enhanced session management with real-time support
 import { 
   getUserSessions, 
   createChatSession, 
@@ -11,7 +11,7 @@ import {
 import { supabaseAdmin } from './supabase';
 import { handleChatError, ErrorType } from './errorHandler';
 
-// FIXED: Enhanced session types
+// FIXED: Enhanced session types with proper null handling
 export interface EnhancedChatSession {
   id: string;
   user_id: string;
@@ -31,19 +31,19 @@ export interface EnhancedChatSession {
   created_at: string;
   updated_at: string;
   
-  // FIXED: Enhanced metadata
+  // FIXED: Enhanced metadata with proper defaults
   metadata: {
-    totalTokens?: number;
-    averageResponseTime?: number;
-    lastActivity?: string;
-    messageTypes?: {
+    totalTokens: number;
+    averageResponseTime: number;
+    lastActivity: string;
+    messageTypes: {
       text: number;
       image: number;
       file: number;
       audio: number;
       video: number;
     };
-    performance?: {
+    performance: {
       avgProcessingTime: number;
       errorCount: number;
       successRate: number;
@@ -97,7 +97,7 @@ export class SessionManager {
     return SessionManager.instance;
   }
 
-  // FIXED: Enhanced session loading with caching
+  // FIXED: Enhanced session loading with proper type handling
   async loadUserSessions(userId: string, forceRefresh: boolean = false): Promise<EnhancedChatSession[]> {
     try {
       const cacheKey = `user_sessions_${userId}`;
@@ -113,47 +113,52 @@ export class SessionManager {
       // Load from database
       const sessions = await getUserSessions(userId);
       
-      // Enhanced session mapping
+      // FIXED: Enhanced session mapping with proper type casting
       const enhancedSessions: EnhancedChatSession[] = await Promise.all(
         sessions.map(async (session: any) => {
           const metadata = await this.calculateSessionMetadata(session.id);
-      if (!metadata) {
-        throw new Error(`Failed to calculate metadata for session ${session.id}`);
-      }
+          
+          // FIXED: Proper settings type handling
+          let sessionSettings: EnhancedChatSession['settings'];
+          
+          if (session.settings && typeof session.settings === 'object' && session.settings !== null) {
+            // Handle JSON type from database
+            if (Array.isArray(session.settings)) {
+              // If it's an array, use default settings
+              sessionSettings = {
+                model: 'gemini-2.5-flash',
+                temperature: 0.7,
+                maxTokens: 4096,
+                autoTitle: true
+              };
+            } else {
+              // If it's an object, merge with defaults
+              sessionSettings = {
+                model: 'gemini-2.5-flash',
+                temperature: 0.7,
+                maxTokens: 4096,
+                autoTitle: true,
+                ...(session.settings as Record<string, any>)
+              };
+            }
+          } else {
+            // Default settings
+            sessionSettings = {
+              model: 'gemini-2.5-flash',
+              temperature: 0.7,
+              maxTokens: 4096,
+              autoTitle: true
+            };
+          }
           
           return {
             ...session,
-            settings: typeof session.settings === 'object' && session.settings !== null 
-              ? {
-                  model: 'gemini-2.5-flash',
-                  temperature: 0.7,
-                  maxTokens: 4096,
-                  autoTitle: true,
-                  ...session.settings
-                }
-              : {
-                  model: 'gemini-2.5-flash',
-                  temperature: 0.7,
-                  maxTokens: 4096,
-                  autoTitle: true
-                },
-            metadata: metadata || {
-              totalTokens: 0,
-              averageResponseTime: 0,
-              lastActivity: session.updated_at,
-              messageTypes: {
-                text: 0,
-                image: 0,
-                file: 0,
-                audio: 0,
-                video: 0
-              },
-              performance: {
-                avgProcessingTime: 0,
-                errorCount: 0,
-                successRate: 100
-              }
-            }
+            // FIXED: Ensure user_id is string and handle null values properly
+            user_id: session.user_id || userId,
+            last_message_at: session.last_message_at || new Date().toISOString(),
+            context_summary: session.context_summary || undefined, // FIXED: Convert null to undefined
+            settings: sessionSettings,
+            metadata: metadata
           };
         })
       );
@@ -210,6 +215,9 @@ export class SessionManager {
       // Create enhanced session object
       const enhancedSession: EnhancedChatSession = {
         ...newSession,
+        user_id: userId,  // FIXED: Ensure user_id is set
+        last_message_at: newSession.last_message_at || new Date().toISOString(), // FIXED: Handle null
+        context_summary: newSession.context_summary || undefined, // FIXED: Convert null to undefined
         settings: sessionSettings,
         metadata: {
           totalTokens: 0,
@@ -272,10 +280,18 @@ export class SessionManager {
         throw new Error('Failed to retrieve updated session');
       }
 
+      // FIXED: Ensure user_id is string
+      if (!updatedSession.user_id) {
+        throw new Error('Session missing user_id');
+      }
+
       // Create enhanced session object
       const enhancedSession: EnhancedChatSession = {
         ...updatedSession,
-        settings: updatedSession.settings || {
+        user_id: updatedSession.user_id,
+        last_message_at: updatedSession.last_message_at || new Date().toISOString(), // FIXED: Handle null
+        context_summary: updatedSession.context_summary || undefined, // FIXED: Convert null to undefined
+        settings: updatedSession.settings as EnhancedChatSession['settings'] || {
           model: 'gemini-2.5-flash',
           temperature: 0.7,
           maxTokens: 4096,
@@ -333,7 +349,7 @@ export class SessionManager {
     }
   }
 
-  // FIXED: Enhanced message loading with caching
+  // FIXED: Enhanced message loading with proper null handling
   async loadSessionMessages(sessionId: string, limit: number = 50): Promise<SessionMessage[]> {
     try {
       // Check cache first
@@ -347,25 +363,27 @@ export class SessionManager {
       // Load from database
       const messages = await getSessionMessages(sessionId, limit);
       
-      // Enhanced message mapping - FIXED: Handle null values
-      const enhancedMessages: SessionMessage[] = messages.map((msg: any) => ({
-        id: msg.id,
-        session_id: msg.session_id || sessionId,
-        user_id: msg.user_id || '',
-        role: msg.role,
-        content: msg.content,
-        attachments: msg.attachments || [],
-        metadata: {
-          model: msg.model_used,
-          temperature: msg.metadata?.temperature,
-          processingTime: msg.processing_time_ms,
-          tokenCount: msg.tokens_used,
-          timestamp: msg.created_at,
-          ...msg.metadata
-        },
-        created_at: msg.created_at,
-        updated_at: msg.updated_at
-      }));
+      // FIXED: Enhanced message mapping with null safety
+      const enhancedMessages: SessionMessage[] = messages
+        .filter((msg: any) => msg.session_id && msg.user_id) // Filter out messages with null required fields
+        .map((msg: any) => ({
+          id: msg.id,
+          session_id: msg.session_id,
+          user_id: msg.user_id,
+          role: msg.role,
+          content: msg.content,
+          attachments: msg.attachments || [],
+          metadata: {
+            model: msg.model_used,
+            temperature: msg.metadata?.temperature,
+            processingTime: msg.processing_time_ms,
+            tokenCount: msg.tokens_used,
+            timestamp: msg.created_at,
+            ...msg.metadata
+          },
+          created_at: msg.created_at,
+          updated_at: msg.updated_at
+        }));
 
       // Cache results
       this.messageCache.set(sessionId, enhancedMessages);
@@ -454,11 +472,12 @@ export class SessionManager {
     }
   }
 
-  // FIXED: Enhanced session metadata calculation
+  // FIXED: Enhanced session metadata calculation with proper defaults
   private async calculateSessionMetadata(sessionId: string): Promise<EnhancedChatSession['metadata']> {
     try {
       const messages = await this.loadSessionMessages(sessionId, 1000);
       
+      // FIXED: Initialize with proper defaults
       const metadata: EnhancedChatSession['metadata'] = {
         totalTokens: 0,
         averageResponseTime: 0,
@@ -498,8 +517,8 @@ export class SessionManager {
           processingTimeCount++;
         }
         
-        // Count message types
-        if (msg.attachments.length > 0) {
+        // Count message types - FIXED: Safe access with nullish coalescing
+        if (msg.attachments && msg.attachments.length > 0) {
           msg.attachments.forEach(att => {
             if (att.type?.startsWith('image/')) {
               metadata.messageTypes.image++;
@@ -526,6 +545,7 @@ export class SessionManager {
       return metadata;
     } catch (error) {
       console.error('Error calculating session metadata:', error);
+      // FIXED: Return proper default structure
       return {
         totalTokens: 0,
         averageResponseTime: 0,
@@ -626,10 +646,11 @@ export class SessionManager {
         const day = session.created_at.split('T')[0];
         sessionsByDay[day] = (sessionsByDay[day] || 0) + 1;
         
-        // Count by message type
-        if (session.metadata.messageTypes) {
-          Object.entries(session.metadata.messageTypes).forEach(([type, count]) => {
-            messagesByType[type] = (messagesByType[type] || 0) + (count as number);
+        // Count by message type - FIXED: Safe access
+        const messageTypes = session.metadata.messageTypes;
+        if (messageTypes) {
+          Object.entries(messageTypes).forEach(([type, count]) => {
+            messagesByType[type] = (messagesByType[type] || 0) + count;
           });
         }
       });
@@ -672,23 +693,26 @@ export class SessionManager {
         throw error;
       }
 
-      return messages?.map(msg => ({
-        id: msg.id,
-        session_id: msg.session_id,
-        user_id: msg.user_id,
-        role: msg.role,
-        content: msg.content,
-        attachments: msg.attachments || [],
-        metadata: msg.metadata || {},
-        created_at: msg.created_at
-      })) || [];
+      // FIXED: Filter and map with explicit type safety
+      return messages
+        ?.filter((msg: any): msg is any => msg.session_id !== null && msg.user_id !== null) // Type guard
+        ?.map(msg => ({
+          id: msg.id,
+          session_id: msg.session_id as string, // Type assertion after filter
+          user_id: msg.user_id as string, // Type assertion after filter
+          role: msg.role,
+          content: msg.content,
+          attachments: msg.attachments || [],
+          metadata: msg.metadata || {},
+          created_at: msg.created_at
+        })) || [];
     } catch (error) {
       console.error('Error getting recent activity:', error);
       return [];
     }
   }
 
-  // FIXED: Helper methods
+  // FIXED: Helper methods with proper null handling
   private async getSession(sessionId: string): Promise<EnhancedChatSession | null> {
     try {
       const { data: session, error } = await supabaseAdmin
@@ -697,19 +721,22 @@ export class SessionManager {
         .eq('id', sessionId)
         .single();
 
-      if (error || !session) {
+      if (error || !session || !session.user_id) {
         return null;
       }
 
       return {
         ...session,
+        user_id: session.user_id,
+        last_message_at: session.last_message_at || new Date().toISOString(), // FIXED: Handle null
+        context_summary: session.context_summary || undefined, // FIXED: Convert null to undefined
         settings: typeof session.settings === 'object' && session.settings !== null 
           ? {
               model: 'gemini-2.5-flash',
               temperature: 0.7,
               maxTokens: 4096,
               autoTitle: true,
-              ...session.settings
+              ...(session.settings as Record<string, any>)
             }
           : {
               model: 'gemini-2.5-flash',

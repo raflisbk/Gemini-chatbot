@@ -1,4 +1,4 @@
-// src/lib/errorHandler.ts - Enhanced error handler with chat integration
+// src/lib/errorHandler.ts - FIXED Enhanced error handler with chat integration
 import { supabaseAdmin } from './supabase';
 
 export enum ErrorType {
@@ -87,7 +87,7 @@ export class AppErrorHandler {
     let severity: 'low' | 'medium' | 'high' | 'critical' = 'medium';
     let userMessage = 'An unexpected error occurred';
 
-    // Extract error message
+    // FIXED: Extract error message with proper type handling
     const message = error?.message || error?.error || String(error);
 
     // FIXED: Enhanced error classification logic
@@ -185,11 +185,15 @@ export class AppErrorHandler {
     try {
       const instance = AppErrorHandler.getInstance();
       
+      // FIXED: Proper error message extraction
+      const errorMessage = error instanceof Error ? error.message : String(error);
+      const errorStack = error instanceof Error ? error.stack : undefined;
+      
       const errorReport: ErrorReport = {
         errorId: `error_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`,
         timestamp: new Date().toISOString(),
-        message: error instanceof Error ? error.message : String(error),
-        stack: error instanceof Error ? error.stack : undefined,
+        message: errorMessage,
+        stack: errorStack,
         userAgent: typeof window !== 'undefined' ? navigator.userAgent : 'server',
         url: typeof window !== 'undefined' ? window.location.href : 'server',
         userId: context?.userId,
@@ -241,28 +245,32 @@ export class AppErrorHandler {
     }
   }
 
-  // FIXED: Enhanced batch processing
+  // FIXED: Enhanced batch processing with correct field mapping
   private async processBatch(errors: ErrorReport[]): Promise<void> {
     try {
+      // FIXED: Map fields to match database schema exactly
+      const mappedErrors = errors.map(err => ({
+        // Required fields
+        error_message: err.message,
+        error_type: err.level,
+        
+        // Optional fields that match database schema
+        error_stack: err.stack || null,
+        user_agent: err.userAgent || null,
+        request_url: err.url || null,
+        user_id: err.userId || null,
+        session_id: err.sessionId || null,
+        ip_address: null, // Will be filled if available
+        request_method: null, // Will be filled if available
+        browser_info: err.extra || {},
+        resolved: false,
+        resolved_at: null
+      }));
+
       // Store errors in database
       const { error: insertError } = await supabaseAdmin
         .from('error_reports')
-        .insert(
-          errors.map(err => ({
-            error_id: err.errorId,
-            timestamp: err.timestamp,
-            message: err.message,
-            stack: err.stack,
-            component_stack: err.componentStack,
-            user_agent: err.userAgent,
-            url: err.url,
-            user_id: err.userId,
-            session_id: err.sessionId,
-            level: err.level,
-            tags: err.tags,
-            extra: err.extra
-          }))
-        );
+        .insert(mappedErrors);
 
       if (insertError) {
         console.error('Error inserting error reports:', insertError);
@@ -321,11 +329,11 @@ export class AppErrorHandler {
         .select('*');
 
       if (startDate) {
-        query = query.gte('timestamp', startDate);
+        query = query.gte('created_at', startDate);
       }
       
       if (endDate) {
-        query = query.lte('timestamp', endDate);
+        query = query.lte('created_at', endDate);
       }
 
       if (userId) {
@@ -333,14 +341,14 @@ export class AppErrorHandler {
       }
 
       const { data: errors, error } = await query
-        .order('timestamp', { ascending: false })
+        .order('created_at', { ascending: false })
         .limit(1000);
 
       if (error) {
         throw error;
       }
 
-      // Analyze errors - FIXED: Use correct schema fields
+      // FIXED: Analyze errors with correct schema fields
       const analytics = {
         totalErrors: errors?.length || 0,
         errorsByType: {} as Record<string, number>,
@@ -348,7 +356,7 @@ export class AppErrorHandler {
         errorsByUser: {} as Record<string, number>,
         errorsByDay: {} as Record<string, number>,
         topErrors: [] as Array<{ message: string; count: number }>,
-        criticalErrors: errors?.filter(err => err.error_type === 'critical').length || 0
+        criticalErrors: errors?.filter(err => err.error_type === 'error').length || 0
       };
 
       // Group errors by various dimensions
@@ -470,9 +478,9 @@ export class AppErrorHandler {
   }
 }
 
-// FIXED: Enhanced error boundary helper
+// FIXED: Enhanced error boundary helper with proper type handling
 export const handleChatError = async (
-  error: any,
+  error: unknown, // FIXED: Use unknown instead of any
   context: {
     userId?: string;
     sessionId?: string;
@@ -481,12 +489,18 @@ export const handleChatError = async (
     metadata?: Record<string, any>;
   }
 ): Promise<ClassifiedError> => {
-  // Classify the error
+  // FIXED: Classify the error with proper type conversion
   const classifiedError = AppErrorHandler.classifyError(error, context.component);
   
-  // Report the error - FIXED: Handle both Error objects and strings
-  const errorToReport = error instanceof Error ? error : new Error(String(error));
-  await AppErrorHandler.reportError(errorToReport, context);
+  // FIXED: Report the error with proper type handling
+  if (error instanceof Error) {
+    await AppErrorHandler.reportError(error, context);
+  } else if (typeof error === 'string') {
+    await AppErrorHandler.reportError(error, context);
+  } else {
+    // Convert unknown error to string
+    await AppErrorHandler.reportError(String(error), context);
+  }
   
   return classifiedError;
 };
@@ -530,10 +544,18 @@ export const recoverFromError = async (
     }
   } catch (recoveryError) {
     console.error('Error during recovery:', recoveryError);
-    await AppErrorHandler.reportError(recoveryError, {
-      component: 'error_recovery',
-      action: 'recovery_failed'
-    });
+    // FIXED: Proper error handling for recovery errors
+    if (recoveryError instanceof Error) {
+      await AppErrorHandler.reportError(recoveryError, {
+        component: 'error_recovery',
+        action: 'recovery_failed'
+      });
+    } else {
+      await AppErrorHandler.reportError(String(recoveryError), {
+        component: 'error_recovery',
+        action: 'recovery_failed'
+      });
+    }
   }
 };
 

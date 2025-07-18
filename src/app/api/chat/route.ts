@@ -1,4 +1,4 @@
-// src/app/api/chat/route.ts - Enhanced version with existing features
+// src/app/api/chat/route.ts - FIXED Enhanced version with existing features
 import { NextRequest, NextResponse } from 'next/server';
 import { GoogleGenerativeAI } from '@google/generative-ai';
 
@@ -53,7 +53,7 @@ interface ChatRequest {
 interface ChatResponse {
   success: boolean;
   response?: string;
-  sessionId?: string | undefined;
+  sessionId?: string;
   messageId?: string;
   usage?: {
     messageCount: number;
@@ -165,9 +165,9 @@ export async function POST(request: NextRequest): Promise<NextResponse<ChatRespo
     // Process attachments with enhanced validation
     const processedAttachments = await processAttachments(attachments);
 
-    // Build conversation context with enhanced memory
+    // FIXED: Build conversation context with proper null check
     const conversationParts = await buildEnhancedContext(
-      currentSessionId || '', 
+      currentSessionId || '', // FIXED: Provide fallback empty string
       message, 
       processedAttachments,
       user?.id
@@ -200,10 +200,11 @@ export async function POST(request: NextRequest): Promise<NextResponse<ChatRespo
     // Calculate tokens used (approximate)
     const tokensUsed = Math.ceil((message.length + aiResponse.length) / 4);
 
-    // FIXED: Enhanced database saving with proper error handling
+    // FIXED: Enhanced database saving with proper error handling and null checks
     let userMessageId: string | undefined;
     let aiMessageId: string | undefined;
 
+    // FIXED: Add null check for currentSessionId before database operations
     if (user && currentSessionId && !currentSessionId.startsWith('temp_') && !currentSessionId.startsWith('guest_')) {
       try {
         // Save user message
@@ -230,10 +231,10 @@ export async function POST(request: NextRequest): Promise<NextResponse<ChatRespo
         );
 
         // Update session metadata
-        const messageCount = await getSessionMessageCount(currentSessionId);
+        const messageCountResult = await getSessionMessageCount(currentSessionId);
         await updateChatSession(currentSessionId, {
           last_message_at: new Date().toISOString(),
-          message_count: messageCount + 2,
+          message_count: messageCountResult + 2,
           context_summary: aiResponse.slice(0, 200) + (aiResponse.length > 200 ? '...' : '')
         });
 
@@ -244,8 +245,8 @@ export async function POST(request: NextRequest): Promise<NextResponse<ChatRespo
         console.error('Database save error:', error);
         // Continue without saving if there's an error
       }
-    } else if (isGuest) {
-      // FIXED: Track guest usage
+    } else if (isGuest && currentSessionId) {
+      // FIXED: Track guest usage with null check
       await trackGuestUsage(request, currentSessionId);
     }
 
@@ -253,11 +254,11 @@ export async function POST(request: NextRequest): Promise<NextResponse<ChatRespo
     const processingTime = Date.now() - startTime;
     const remainingMessages = limit === -1 ? -1 : Math.max(0, limit - messageCount - 1);
 
-    // Return successful response
+    // FIXED: Return successful response with proper sessionId handling
     const response: ChatResponse = {
       success: true,
       response: aiResponse,
-      sessionId: currentSessionId,
+      sessionId: currentSessionId || undefined, // FIXED: Explicit undefined if null
       messageId: aiMessageId,
       usage: {
         messageCount: messageCount + 1,
@@ -369,7 +370,7 @@ function getClientIP(request?: NextRequest): string {
   return 'unknown';
 }
 
-// FIXED: Track guest usage
+// FIXED: Track guest usage with proper session handling
 async function trackGuestUsage(request: NextRequest, sessionId: string): Promise<void> {
   try {
     const ip = getClientIP(request);
@@ -437,7 +438,7 @@ async function buildEnhancedContext(
 Always maintain context awareness and provide informative, accurate responses. When analyzing attachments, be thorough and detailed in your insights.`
   });
 
-  // FIXED: Load conversation history with proper error handling
+  // FIXED: Load conversation history with proper error handling and null checks
   if (sessionId && userId && !sessionId.startsWith('temp_') && !sessionId.startsWith('guest_')) {
     try {
       const messages = await getSessionMessages(sessionId);
