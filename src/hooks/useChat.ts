@@ -1,6 +1,7 @@
-// src/hooks/useChat.ts - Enhanced Version
+// src/hooks/useChat.ts - Enhanced Version with existing features preserved
 import { useState, useCallback, useRef, useEffect } from 'react';
 import { generateId } from '@/lib/utils';
+import { useAuth } from '@/context/AuthContext';
 
 // Types
 export interface Message {
@@ -65,6 +66,9 @@ export function useChat(options: UseChatOptions = {}) {
     maxRetries = 3,
     retryDelay = 1000
   } = options;
+
+  // FIXED: Get auth context for proper authentication
+  const { user, isGuest, getAuthToken } = useAuth();
 
   // Core state
   const [chatState, setChatState] = useState<ChatState>({
@@ -187,7 +191,7 @@ export function useChat(options: UseChatOptions = {}) {
         messages: [...prev.messages, userMessage]
       }));
 
-      // Prepare API payload with better structure
+      // FIXED: Prepare API payload with enhanced structure
       const payload = {
         message: content.trim(),
         sessionId: options.sessionId || chatState.currentSessionId,
@@ -199,26 +203,38 @@ export function useChat(options: UseChatOptions = {}) {
           size: att.size,
           base64: att.base64
         })),
-        conversationContext: buildConversationContext(),
-        continueFrom: options.continueFrom,
         settings: {
-          model: 'gemini-1.5-flash',
+          model: 'gemini-2.5-flash',
           temperature: 0.7,
           maxTokens: 4096,
           ...options.settings
-        }
+        },
+        // FIXED: Add authentication fields
+        userId: user?.id,
+        isGuest: isGuest || !user
       };
 
-      // Get auth token
-      const authToken = localStorage.getItem('auth_token');
+      // FIXED: Enhanced authentication headers
+      const headers: Record<string, string> = {
+        'Content-Type': 'application/json'
+      };
+
+      // Add auth token for authenticated users
+      if (user && !isGuest) {
+        try {
+          const token = await getAuthToken();
+          if (token) {
+            headers['Authorization'] = `Bearer ${token}`;
+          }
+        } catch (error) {
+          console.error('Error getting auth token:', error);
+        }
+      }
 
       // Make API request
       const response = await fetch('/api/chat', {
         method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          ...(authToken && { 'Authorization': `Bearer ${authToken}` })
-        },
+        headers,
         body: JSON.stringify(payload),
         signal: abortControllerRef.current.signal
       });
@@ -233,7 +249,7 @@ export function useChat(options: UseChatOptions = {}) {
           case 401:
             throw new Error('Authentication required. Please login.');
           case 429:
-            throw new Error('Rate limit exceeded. Please try again later.');
+            throw new Error(errorData.error || 'Rate limit exceeded. Please try again later.');
           case 503:
             throw new Error('Service temporarily unavailable. Please try again.');
           default:
@@ -247,15 +263,17 @@ export function useChat(options: UseChatOptions = {}) {
         throw new Error(data.error || 'Failed to get response from AI');
       }
 
-      // Create AI response message
+      // FIXED: Create AI response message with enhanced metadata
       const aiMessage: Message = {
         id: data.messageId || generateId(),
         content: data.response,
         role: 'assistant',
         timestamp: new Date(),
         metadata: {
-          model: payload.settings.model,
-          temperature: payload.settings.temperature,
+          model: data.metadata?.model || payload.settings.model,
+          temperature: data.metadata?.temperature || payload.settings.temperature,
+          processingTime: data.metadata?.processingTime,
+          tokenCount: data.usage?.tokensUsed,
           isComplete: !data.response.endsWith('...')
         }
       };
@@ -296,7 +314,16 @@ export function useChat(options: UseChatOptions = {}) {
       }));
       abortControllerRef.current = null;
     }
-  }, [chatState.currentSessionId, processFileAttachments, buildConversationContext, onSuccess, onError]);
+  }, [
+    chatState.currentSessionId, 
+    user, 
+    isGuest, 
+    getAuthToken,
+    processFileAttachments, 
+    buildConversationContext, 
+    onSuccess, 
+    onError
+  ]);
 
   // Continue message function
   const continueMessage = useCallback(async (): Promise<void> => {
@@ -342,12 +369,21 @@ export function useChat(options: UseChatOptions = {}) {
       messages: newMessages
     }));
 
+    // Update conversation memory
+    conversationMemory.current = [...newMessages];
+
     // Retry the message
     await sendMessage(lastUserMessage.content, {
       files: lastUserMessage.attachments?.map(att => {
         // Convert back to File object if possible
-        return new File([''], att.name, { type: att.type });
-      }),
+        try {
+          const blob = new Blob([''], { type: att.type });
+          return new File([blob], att.name, { type: att.type });
+        } catch (error) {
+          console.error('Error converting attachment back to file:', error);
+          return null;
+        }
+      }).filter(Boolean) as File[],
       sessionId: chatState.currentSessionId ?? undefined
     });
   }, [retryCount, maxRetries, retryDelay, chatState.messages, chatState.currentSessionId, sendMessage]);
@@ -390,7 +426,9 @@ export function useChat(options: UseChatOptions = {}) {
       messages: validMessages,
       currentSessionId: sessionId || null,
       error: null,
-      canContinue: false
+      canContinue: validMessages.length > 0 && 
+                  validMessages[validMessages.length - 1]?.role === 'assistant' &&
+                  !validMessages[validMessages.length - 1]?.metadata?.isComplete
     }));
 
     conversationMemory.current = [...validMessages];
@@ -445,6 +483,41 @@ export function useChat(options: UseChatOptions = {}) {
     };
   }, [getConversationSummary]);
 
+  // FIXED: Enhanced message search functionality
+  const searchMessages = useCallback((query: string): Message[] => {
+    if (!query.trim()) return [];
+    
+    const searchTerm = query.toLowerCase().trim();
+    return conversationMemory.current.filter(msg => 
+      msg.content.toLowerCase().includes(searchTerm) ||
+      msg.attachments?.some(att => att.name.toLowerCase().includes(searchTerm))
+    );
+  }, []);
+
+  // FIXED: Get message statistics
+  const getMessageStats = useCallback(() => {
+    const messages = conversationMemory.current;
+    const totalChars = messages.reduce((sum, msg) => sum + msg.content.length, 0);
+    const totalAttachments = messages.reduce((sum, msg) => sum + (msg.attachments?.length || 0), 0);
+    
+    return {
+      totalMessages: messages.length,
+      totalCharacters: totalChars,
+      totalAttachments,
+      averageMessageLength: messages.length > 0 ? Math.round(totalChars / messages.length) : 0,
+      userMessages: messages.filter(msg => msg.role === 'user').length,
+      assistantMessages: messages.filter(msg => msg.role === 'assistant').length
+    };
+  }, []);
+
+  // FIXED: Update session ID
+  const updateSessionId = useCallback((sessionId: string | null) => {
+    setChatState(prev => ({
+      ...prev,
+      currentSessionId: sessionId
+    }));
+  }, []);
+
   // Cleanup on unmount
   useEffect(() => {
     return () => {
@@ -472,10 +545,19 @@ export function useChat(options: UseChatOptions = {}) {
     loadMessages,
     clearError,
     cancelRequest,
+    updateSessionId,
     
     // Utilities
     getConversationSummary,
     exportConversation,
-    processFileAttachments
+    processFileAttachments,
+    searchMessages,
+    getMessageStats,
+    
+    // Computed values
+    canRetry: retryCount < maxRetries,
+    conversationLength: chatState.messages.length,
+    hasMessages: chatState.messages.length > 0,
+    lastMessage: chatState.messages[chatState.messages.length - 1] || null
   };
 }

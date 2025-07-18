@@ -1,10 +1,12 @@
-// src/context/AuthContext.tsx - COMPLETE INTEGRATED VERSION
+// src/context/AuthContext.tsx - ENHANCED VERSION with Database Integration
 'use client';
 
 import React, { createContext, useContext, useState, useEffect, useCallback } from 'react';
+import { verifyToken } from '@/lib/auth';
+import { getUserById, trackUsage } from '@/lib/supabase';
 
 // ========================================
-// INTERFACES & TYPES
+// INTERFACES & TYPES (Keep existing structure)
 // ========================================
 
 interface User {
@@ -132,6 +134,9 @@ interface AuthContextType {
   quotaUsed: number;
   quotaLimit: number;
   
+  // FIXED: Add auth token getter for API calls
+  getAuthToken: () => Promise<string | null>;
+  
   // Settings
   modelSettings: ModelSettings;
   chatSettings: ChatSettings;
@@ -159,7 +164,7 @@ interface AuthContextType {
 }
 
 // ========================================
-// QUOTA CONSTANTS
+// QUOTA CONSTANTS (Keep existing values)
 // ========================================
 
 const QUOTA_LIMITS = {
@@ -169,7 +174,7 @@ const QUOTA_LIMITS = {
 };
 
 // ========================================
-// DEFAULT VALUES
+// DEFAULT VALUES (Keep existing structure)
 // ========================================
 
 const defaultAuthState: AuthState = {
@@ -285,6 +290,30 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
   const quotaLimit = QUOTA_LIMITS[userRole as keyof typeof QUOTA_LIMITS];
 
   // ========================================
+  // FIXED: Enhanced auth token getter for API calls
+  // ========================================
+
+  const getAuthToken = useCallback(async (): Promise<string | null> => {
+    try {
+      const token = localStorage.getItem('auth_token');
+      if (!token) return null;
+
+      // Verify token is still valid
+      const decoded = await verifyToken(token);
+      if (!decoded) {
+        localStorage.removeItem('auth_token');
+        return null;
+      }
+
+      return token;
+    } catch (error) {
+      console.error('Error getting auth token:', error);
+      localStorage.removeItem('auth_token');
+      return null;
+    }
+  }, []);
+
+  // ========================================
   // INITIALIZATION
   // ========================================
 
@@ -297,6 +326,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     loadQuotaUsage();
   }, [authState.user, authState.isGuest]);
 
+  // FIXED: Enhanced initialization with proper database integration
   const initializeAuth = async () => {
     try {
       setAuthState(prev => ({ ...prev, isLoading: true }));
@@ -306,10 +336,39 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       if (token) {
         const isValid = await verifyToken(token);
         if (isValid) {
-          return; // User is authenticated
-        } else {
-          localStorage.removeItem('auth_token');
+          // Load user data from database
+          const userData = await getUserById(isValid.userId);
+          if (userData && userData.is_active) {
+            const user = {
+              id: userData.id,
+              email: userData.email,
+              name: userData.name,
+              role: userData.role as 'admin' | 'user',
+              isActive: userData.is_active,
+              avatarUrl: userData.avatar_url,
+              photoURL: userData.avatar_url,
+              messageCount: userData.message_count,
+              lastLogin: userData.last_login,
+              settings: userData.settings,
+              created_at: userData.created_at,
+              updated_at: userData.updated_at
+            };
+            
+            setAuthState(prev => ({
+              ...prev,
+              isAuthenticated: true,
+              user,
+              isGuest: false,
+              guestSession: null,
+              isLoading: false
+            }));
+            
+            await refreshUsage();
+            return;
+          }
         }
+        // If token is invalid, remove it
+        localStorage.removeItem('auth_token');
       }
       
       // Initialize as guest
@@ -322,42 +381,11 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     }
   };
 
-  const verifyToken = async (token: string): Promise<boolean> => {
-    try {
-      const response = await fetch('/api/auth/verify', {
-        headers: { Authorization: `Bearer ${token}` },
-      });
-
-      if (response.ok) {
-        const data = await response.json();
-        
-        const user = {
-          ...data.user,
-          photoURL: data.user.avatarUrl || data.user.avatar_url || null
-        };
-        
-        setAuthState(prev => ({
-          ...prev,
-          isAuthenticated: true,
-          user,
-          isGuest: false,
-          guestSession: null,
-        }));
-        await refreshUsage();
-        return true;
-      }
-      return false;
-    } catch (error) {
-      console.error('Token verification error:', error);
-      return false;
-    }
-  };
-
   // ========================================
-  // QUOTA MANAGEMENT
+  // QUOTA MANAGEMENT (Enhanced with database tracking)
   // ========================================
 
-  const loadQuotaUsage = useCallback(() => {
+  const loadQuotaUsage = useCallback(async () => {
     try {
       if (userRole === 'guest') {
         const guestUsage = localStorage.getItem('guest-quota-usage');
@@ -373,13 +401,32 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
           setQuotaUsed(guestUsage ? parseInt(guestUsage) : 0);
         }
       } else if (authState.user) {
-        // For authenticated users, load from database or localStorage
-        setQuotaUsed(authState.user.messageCount || 0);
+        // FIXED: Load from database for authenticated users
+        try {
+          const token = await getAuthToken();
+          if (token) {
+            const response = await fetch('/api/usage', {
+              headers: { Authorization: `Bearer ${token}` },
+            });
+            
+            if (response.ok) {
+              const data = await response.json();
+              setQuotaUsed(data.usage?.messageCount || 0);
+              setUsage(data.usage);
+            } else {
+              // Fallback to stored value
+              setQuotaUsed(authState.user.messageCount || 0);
+            }
+          }
+        } catch (error) {
+          console.error('Error loading user quota from database:', error);
+          setQuotaUsed(authState.user.messageCount || 0);
+        }
       }
     } catch (error) {
       console.error('Error loading quota usage:', error);
     }
-  }, [userRole, authState.user]);
+  }, [userRole, authState.user, getAuthToken]);
 
   const canSendMessage = useCallback((): boolean => {
     if (userRole === 'admin') return true;
@@ -396,11 +443,12 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
   }, [quotaLimit]);
 
   // ========================================
-  // GUEST SESSION MANAGEMENT
+  // GUEST SESSION MANAGEMENT (Enhanced)
   // ========================================
 
   const initializeGuest = async (): Promise<void> => {
     try {
+      // Try to create guest session via API
       const response = await fetch('/api/auth/guest', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -442,7 +490,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
   };
 
   // ========================================
-  // AUTHENTICATION ACTIONS
+  // AUTHENTICATION ACTIONS (Enhanced)
   // ========================================
 
   const login = useCallback(async (email: string, password: string): Promise<boolean> => {
@@ -463,10 +511,21 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
         localStorage.removeItem('guest-quota-usage');
         localStorage.removeItem('guest-quota-reset');
         
+        // FIXED: Get user data from database after login
+        const userData = await getUserById(data.user.id);
         const user = {
-          ...data.user,
-          photoURL: data.user.avatarUrl || data.user.avatar_url || null,
-          role: data.user.role || 'user' // Ensure role is set
+          id: userData.id,
+          email: userData.email,
+          name: userData.name,
+          role: userData.role as 'admin' | 'user',
+          isActive: userData.is_active,
+          avatarUrl: userData.avatar_url,
+          photoURL: userData.avatar_url,
+          messageCount: userData.message_count,
+          lastLogin: userData.last_login,
+          settings: userData.settings,
+          created_at: userData.created_at,
+          updated_at: userData.updated_at
         };
         
         setAuthState(prev => ({
@@ -516,10 +575,21 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
         localStorage.setItem('auth_token', data.token);
         localStorage.removeItem('guest-token');
         
+        // FIXED: Get user data from database after registration
+        const userDataFromDB = await getUserById(data.user.id);
         const user = {
-          ...data.user,
-          photoURL: data.user.avatarUrl || data.user.avatar_url || null,
-          role: data.user.role || 'user'
+          id: userDataFromDB.id,
+          email: userDataFromDB.email,
+          name: userDataFromDB.name,
+          role: userDataFromDB.role as 'admin' | 'user',
+          isActive: userDataFromDB.is_active,
+          avatarUrl: userDataFromDB.avatar_url,
+          photoURL: userDataFromDB.avatar_url,
+          messageCount: userDataFromDB.message_count,
+          lastLogin: userDataFromDB.last_login,
+          settings: userDataFromDB.settings,
+          created_at: userDataFromDB.created_at,
+          updated_at: userDataFromDB.updated_at
         };
         
         setAuthState(prev => ({
@@ -572,12 +642,12 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
   }, []);
 
   // ========================================
-  // USAGE TRACKING
+  // USAGE TRACKING (Enhanced with database)
   // ========================================
 
   const refreshUsage = useCallback(async () => {
     try {
-      const token = localStorage.getItem('auth_token');
+      const token = await getAuthToken();
       if (!token) return;
 
       const response = await fetch('/api/usage', {
@@ -592,10 +662,12 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     } catch (error) {
       console.error('Usage refresh error:', error);
     }
-  }, []);
+  }, [getAuthToken]);
 
-  const updateUsage = useCallback((type: 'message' | 'file') => {
-    if (authState.isAuthenticated) {
+  // FIXED: Enhanced usage tracking with database integration
+  const updateUsage = useCallback(async (type: 'message' | 'file') => {
+    if (authState.isAuthenticated && authState.user) {
+      // Update local state immediately
       setUsage(prev => ({
         ...prev,
         messageCount: type === 'message' ? prev.messageCount + 1 : prev.messageCount,
@@ -604,6 +676,13 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       
       if (type === 'message') {
         setQuotaUsed(prev => prev + 1);
+      }
+
+      // FIXED: Track usage in database with correct parameter type
+      try {
+        await trackUsage(authState.user.id, type === 'file' ? 'file_upload' : type);
+      } catch (error) {
+        console.error('Error tracking usage in database:', error);
       }
     } else if (authState.isGuest) {
       const newUsage = quotaUsed + 1;
@@ -623,7 +702,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
   }, [authState, quotaUsed]);
 
   // ========================================
-  // SETTINGS MANAGEMENT
+  // SETTINGS MANAGEMENT (Keep existing functionality)
   // ========================================
 
   const loadSettings = useCallback(() => {
@@ -695,7 +774,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
   }, []);
 
   // ========================================
-  // SETTINGS MANAGEMENT FUNCTIONS
+  // SETTINGS MANAGEMENT FUNCTIONS (Keep existing)
   // ========================================
 
   const resetSettingsToDefaults = useCallback(() => {
@@ -789,6 +868,9 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     getQuotaLimit,
     quotaUsed,
     quotaLimit,
+    
+    // FIXED: Add auth token getter
+    getAuthToken,
     
     // Settings
     modelSettings,

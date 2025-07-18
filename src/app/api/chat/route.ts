@@ -1,5 +1,4 @@
-// src/app/api/chat/route.ts - Fixed version with correct imports
-
+// src/app/api/chat/route.ts - Enhanced version with existing features
 import { NextRequest, NextResponse } from 'next/server';
 import { GoogleGenerativeAI } from '@google/generative-ai';
 
@@ -8,6 +7,8 @@ import {
   createChatSession,
   updateChatSession,
   getSessionMessages,
+  createMessage,
+  getUserById,
   trackUsage
 } from '@/lib/supabase';
 
@@ -15,8 +16,18 @@ import {
 import { verifyToken } from '@/lib/auth';
 import { AppErrorHandler, ErrorType } from '@/lib/errorHandler';
 
+// FIXED: Import supabase admin for guest tracking
+import { supabaseAdmin } from '@/lib/supabase';
+
 // Initialize Gemini AI
 const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY!);
+
+// FIXED: Enhanced rate limiting configuration (match AuthContext)
+const RATE_LIMITS = {
+  guest: 5,
+  user: 25,
+  admin: Infinity // unlimited
+} as const;
 
 interface ChatRequest {
   message: string;
@@ -34,12 +45,15 @@ interface ChatRequest {
     temperature?: number;
     maxTokens?: number;
   };
+  // FIXED: Add fields for database integration
+  userId?: string;
+  isGuest?: boolean;
 }
 
 interface ChatResponse {
   success: boolean;
   response?: string;
-  sessionId?: string | undefined; // FIXED: Allow undefined
+  sessionId?: string | undefined;
   messageId?: string;
   usage?: {
     messageCount: number;
@@ -51,6 +65,8 @@ interface ChatResponse {
     temperature: number;
     processingTime: number;
     attachmentCount: number;
+    userRole?: string;
+    remainingMessages?: number;
   };
   error?: string;
   errorType?: string;
@@ -59,12 +75,13 @@ interface ChatResponse {
 export async function POST(request: NextRequest): Promise<NextResponse<ChatResponse>> {
   const startTime = Date.now();
   let user: any = null;
-  let currentSessionId: string | undefined = undefined; // FIXED: Use undefined instead of null
+  let currentSessionId: string | undefined = undefined;
+  let userRole: 'guest' | 'user' | 'admin' = 'guest';
   
   try {
     // Parse request body
     const body: ChatRequest = await request.json();
-    const { message, sessionId, attachments = [], settings = {} } = body;
+    const { message, sessionId, attachments = [], settings = {}, userId, isGuest = false } = body;
 
     // Validate input
     if (!message?.trim() && attachments.length === 0) {
@@ -78,52 +95,85 @@ export async function POST(request: NextRequest): Promise<NextResponse<ChatRespo
       );
     }
 
-    // FIXED: Verify authentication with correct function name
-    const authToken = request.headers.get('authorization')?.replace('Bearer ', '');
-    if (authToken) {
-      try {
-        user = await verifyToken(authToken); // FIXED: Use verifyToken instead of verifyAuthToken
-      } catch (error) {
-        console.error('Auth verification failed:', error);
-        // Continue as guest if auth fails
+    // FIXED: Enhanced authentication with user role detection
+    if (!isGuest && userId) {
+      const authToken = request.headers.get('authorization')?.replace('Bearer ', '');
+      if (authToken) {
+        try {
+          const decoded = await verifyToken(authToken);
+          if (decoded && decoded.userId === userId) {
+            user = await getUserById(userId);
+            if (user && user.is_active) {
+              userRole = user.role;
+            }
+          }
+        } catch (error) {
+          console.error('Auth verification failed:', error);
+          return NextResponse.json(
+            {
+              success: false,
+              error: 'Invalid authentication',
+              errorType: 'auth_error'
+            },
+            { status: 401 }
+          );
+        }
       }
     }
 
-    // FIXED: Simple quota check for authenticated users
-    let quotaCheck = { usage: { messageCount: 0 }, quota: 1000 };
-    if (user) {
-      // Use a simple approach if validateUserQuota doesn't exist
-      try {
-        await trackUsage(user.id, 'message');
-        quotaCheck = { usage: { messageCount: 1 }, quota: 1000 };
-      } catch (error) {
-        console.error('Usage tracking error:', error);
-      }
+    // FIXED: Enhanced rate limiting check
+    const messageCount = await getCurrentMessageCount(userId, isGuest, request);
+    const limit = RATE_LIMITS[userRole];
+    
+    if (limit !== -1 && messageCount >= limit) {
+      return NextResponse.json(
+        {
+          success: false,
+          error: `Rate limit exceeded. ${userRole} users are limited to ${limit} messages per day.`,
+          errorType: 'rate_limit_error',
+          metadata: {
+            model: settings.model || 'gemini-2.5-flash',
+            temperature: settings.temperature ?? 0.7,
+            processingTime: 0,
+            attachmentCount: attachments.length,
+            userRole,
+            remainingMessages: 0
+          }
+        },
+        { status: 429 }
+      );
     }
 
-    // Handle session management
+    // FIXED: Enhanced session management
     currentSessionId = sessionId;
     if (user && !currentSessionId) {
       // Create new session for authenticated users
       const newSessionTitle = message.slice(0, 50) + (message.length > 50 ? '...' : '');
       try {
-        currentSessionId = await createChatSession(user.id, newSessionTitle);
+        const newSession = await createChatSession(user.id, newSessionTitle);
+        currentSessionId = newSession?.id;
       } catch (error) {
         console.error('Session creation error:', error);
+        // Continue with temporary session if creation fails
+        currentSessionId = `temp_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
       }
+    } else if (!currentSessionId) {
+      // Create temporary session for guests
+      currentSessionId = `guest_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
     }
 
-    // Process attachments with proper base64 handling
+    // Process attachments with enhanced validation
     const processedAttachments = await processAttachments(attachments);
 
     // Build conversation context with enhanced memory
     const conversationParts = await buildEnhancedContext(
-      currentSessionId, 
+      currentSessionId || '', 
       message, 
-      processedAttachments
+      processedAttachments,
+      user?.id
     );
 
-    // Configure AI model
+    // Configure AI model with enhanced settings
     const finalSettings = {
       model: settings.model || 'gemini-2.5-flash',
       temperature: settings.temperature ?? 0.7,
@@ -150,15 +200,16 @@ export async function POST(request: NextRequest): Promise<NextResponse<ChatRespo
     // Calculate tokens used (approximate)
     const tokensUsed = Math.ceil((message.length + aiResponse.length) / 4);
 
-    // FIXED: Save messages to database with custom function
+    // FIXED: Enhanced database saving with proper error handling
     let userMessageId: string | undefined;
     let aiMessageId: string | undefined;
 
-    if (user && currentSessionId) {
+    if (user && currentSessionId && !currentSessionId.startsWith('temp_') && !currentSessionId.startsWith('guest_')) {
       try {
-        // Use your existing saveMessage function or create a simple one
-        userMessageId = await saveMessage(
+        // Save user message
+        userMessageId = await saveMessageToDatabase(
           currentSessionId,
+          user.id,
           'user',
           message,
           processedAttachments.map(att => ({
@@ -169,14 +220,16 @@ export async function POST(request: NextRequest): Promise<NextResponse<ChatRespo
           }))
         );
 
-        aiMessageId = await saveMessage(
+        // Save AI response
+        aiMessageId = await saveMessageToDatabase(
           currentSessionId,
+          user.id,
           'assistant',
           aiResponse,
           []
         );
 
-        // Update session
+        // Update session metadata
         const messageCount = await getSessionMessageCount(currentSessionId);
         await updateChatSession(currentSessionId, {
           last_message_at: new Date().toISOString(),
@@ -184,31 +237,40 @@ export async function POST(request: NextRequest): Promise<NextResponse<ChatRespo
           context_summary: aiResponse.slice(0, 200) + (aiResponse.length > 200 ? '...' : '')
         });
 
+        // Track usage for authenticated users
+        await trackUsage(user.id, 'message');
+
       } catch (error) {
         console.error('Database save error:', error);
         // Continue without saving if there's an error
       }
+    } else if (isGuest) {
+      // FIXED: Track guest usage
+      await trackGuestUsage(request, currentSessionId);
     }
 
     // Calculate processing time
     const processingTime = Date.now() - startTime;
+    const remainingMessages = limit === -1 ? -1 : Math.max(0, limit - messageCount - 1);
 
     // Return successful response
     const response: ChatResponse = {
       success: true,
       response: aiResponse,
-      sessionId: currentSessionId, // FIXED: This can be undefined now
+      sessionId: currentSessionId,
       messageId: aiMessageId,
       usage: {
-        messageCount: quotaCheck.usage.messageCount + 1,
-        remainingQuota: quotaCheck.quota - quotaCheck.usage.messageCount - 1,
+        messageCount: messageCount + 1,
+        remainingQuota: remainingMessages,
         tokensUsed
       },
       metadata: {
         model: finalSettings.model,
         temperature: finalSettings.temperature,
         processingTime,
-        attachmentCount: processedAttachments.length
+        attachmentCount: processedAttachments.length,
+        userRole,
+        remainingMessages
       }
     };
 
@@ -233,13 +295,133 @@ export async function POST(request: NextRequest): Promise<NextResponse<ChatRespo
 }
 
 // ========================================
+// ENHANCED RATE LIMITING FUNCTIONS
+// ========================================
+
+// FIXED: Enhanced message count tracking
+async function getCurrentMessageCount(
+  userId?: string, 
+  isGuest: boolean = false, 
+  request?: NextRequest
+): Promise<number> {
+  try {
+    if (isGuest) {
+      // For guests, track by IP address and session
+      const ip = getClientIP(request);
+      const today = new Date().toISOString().split('T')[0];
+      
+      // Check guest sessions table
+      const { data: guestSessions, error } = await supabaseAdmin
+        .from('guest_sessions')
+        .select('message_count')
+        .eq('ip_address', ip)
+        .gte('created_at', `${today}T00:00:00.000Z`)
+        .lte('created_at', `${today}T23:59:59.999Z`);
+
+      if (error) {
+        console.error('Error getting guest message count:', error);
+        return 0;
+      }
+
+      return guestSessions?.reduce((total, session) => total + session.message_count, 0) || 0;
+    } else if (userId) {
+      // For authenticated users, count today's messages
+      const today = new Date().toISOString().split('T')[0];
+      
+      const { data: messages, error } = await supabaseAdmin
+        .from('messages')
+        .select('id')
+        .eq('user_id', userId)
+        .eq('role', 'user')
+        .gte('created_at', `${today}T00:00:00.000Z`)
+        .lte('created_at', `${today}T23:59:59.999Z`);
+
+      if (error) {
+        console.error('Error getting user message count:', error);
+        return 0;
+      }
+
+      return messages?.length || 0;
+    }
+
+    return 0;
+  } catch (error) {
+    console.error('Error getting message count:', error);
+    return 0;
+  }
+}
+
+// FIXED: Get client IP helper
+function getClientIP(request?: NextRequest): string {
+  if (!request) return 'unknown';
+  
+  const forwarded = request.headers.get('x-forwarded-for');
+  const realIP = request.headers.get('x-real-ip');
+  
+  if (forwarded) {
+    return forwarded.split(',')[0].trim();
+  }
+  
+  if (realIP) {
+    return realIP;
+  }
+  
+  return 'unknown';
+}
+
+// FIXED: Track guest usage
+async function trackGuestUsage(request: NextRequest, sessionId: string): Promise<void> {
+  try {
+    const ip = getClientIP(request);
+    const userAgent = request.headers.get('user-agent') || '';
+    const today = new Date().toISOString().split('T')[0];
+    const expiresAt = new Date();
+    expiresAt.setHours(23, 59, 59, 999);
+
+    // Check if guest session exists today
+    const { data: existingSession, error: fetchError } = await supabaseAdmin
+      .from('guest_sessions')
+      .select('*')
+      .eq('ip_address', ip)
+      .gte('created_at', `${today}T00:00:00.000Z`)
+      .lte('created_at', `${today}T23:59:59.999Z`)
+      .single();
+
+    if (existingSession) {
+      // Update existing session
+      await supabaseAdmin
+        .from('guest_sessions')
+        .update({
+          message_count: existingSession.message_count + 1,
+          last_activity: new Date().toISOString()
+        })
+        .eq('id', existingSession.id);
+    } else {
+      // Create new guest session
+      await supabaseAdmin
+        .from('guest_sessions')
+        .insert({
+          ip_address: ip,
+          user_agent: userAgent,
+          message_count: 1,
+          expires_at: expiresAt.toISOString(),
+          session_token: sessionId
+        });
+    }
+  } catch (error) {
+    console.error('Error tracking guest usage:', error);
+  }
+}
+
+// ========================================
 // ENHANCED CONTEXT BUILDING
 // ========================================
 
 async function buildEnhancedContext(
-  sessionId: string | undefined, 
+  sessionId: string, 
   currentMessage: string, 
-  attachments: any[]
+  attachments: any[],
+  userId?: string
 ): Promise<any[]> {
   const parts = [];
   
@@ -256,9 +438,9 @@ Always maintain context awareness and provide informative, accurate responses. W
   });
 
   // FIXED: Load conversation history with proper error handling
-  if (sessionId) {
+  if (sessionId && userId && !sessionId.startsWith('temp_') && !sessionId.startsWith('guest_')) {
     try {
-      const messages = await getSessionMessages(sessionId, 50);
+      const messages = await getSessionMessages(sessionId);
       if (messages && messages.length > 0) {
         parts.push({
           text: "\n=== Previous Conversation Context ===\n"
@@ -412,7 +594,7 @@ async function processAttachments(attachments: any[]): Promise<any[]> {
 
 async function getSessionMessageCount(sessionId: string): Promise<number> {
   try {
-    const messages = await getSessionMessages(sessionId, 1000);
+    const messages = await getSessionMessages(sessionId);
     return messages?.length || 0;
   } catch (error) {
     console.error('Error getting message count:', error);
@@ -420,25 +602,30 @@ async function getSessionMessageCount(sessionId: string): Promise<number> {
   }
 }
 
-// FIXED: Custom saveMessage function to handle your database structure
-async function saveMessage(
+// FIXED: Enhanced saveMessage function with proper database structure
+async function saveMessageToDatabase(
   sessionId: string,
+  userId: string,
   role: 'user' | 'assistant',
   content: string,
   attachments: any[] = []
 ): Promise<string> {
   try {
-    // This should match your existing database structure
-    // Adjust based on your actual saveMessage implementation
-    const messageId = `msg_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
+    const message = await createMessage({
+      session_id: sessionId,
+      user_id: userId,
+      role,
+      content,
+      attachments,
+      metadata: {
+        timestamp: new Date().toISOString(),
+        attachmentCount: attachments.length
+      }
+    });
     
-    // Use your existing supabase client to save message
-    // This is a placeholder - adjust based on your actual implementation
-    console.log('Saving message:', { sessionId, role, content, attachments });
-    
-    return messageId;
+    return message?.id || `msg_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
   } catch (error) {
-    console.error('Error saving message:', error);
+    console.error('Error saving message to database:', error);
     throw error;
   }
 }
@@ -454,5 +641,20 @@ export async function GET() {
       message: 'This endpoint only accepts POST requests' 
     },
     { status: 405 }
+  );
+}
+
+// OPTIONS for CORS
+export async function OPTIONS() {
+  return NextResponse.json(
+    {},
+    {
+      status: 200,
+      headers: {
+        'Access-Control-Allow-Origin': '*',
+        'Access-Control-Allow-Methods': 'POST, OPTIONS',
+        'Access-Control-Allow-Headers': 'Content-Type, Authorization',
+      },
+    }
   );
 }

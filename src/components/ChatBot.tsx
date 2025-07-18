@@ -58,7 +58,6 @@ import { LoadingDots } from './LoadingDots';
 import Logo from './Logo';
 import { ThemeToggle } from './ThemeToggle';
 import { CompactSettingsDialog } from './SettingsDialog';
-// FIXED: Import sidebar component yang sudah diperbaiki
 import FixedChatSidebar from './ChatSidebar';
 import { MessageWithContinue } from './ContinueButton';
 import { TrendingCards } from './TrendingCards';
@@ -70,6 +69,16 @@ import { useAuth } from '@/context/AuthContext';
 import { useVoiceInput, useTextToSpeech } from '@/hooks/useVoiceInput';
 import { useChat } from '@/hooks/useChat';
 import { generateId, debounce, cn } from '@/lib/utils';
+
+// FIXED: Import proper database functions
+import { 
+  getUserSessions, 
+  createChatSession, 
+  deleteSession,
+  updateChatSession,
+  getSessionMessages,
+  createMessage
+} from '@/lib/supabase';
 
 // Types
 interface Message {
@@ -162,7 +171,11 @@ export const ChatBot: React.FC = () => {
     isAdmin, 
     isLoading: authLoading,
     canSendMessage,
-    updateUsage 
+    updateUsage,
+    getAuthToken,
+    getRemainingMessages,
+    quotaUsed,
+    quotaLimit 
   } = useAuth();
 
   // ========================================
@@ -173,9 +186,10 @@ export const ChatBot: React.FC = () => {
   const [showLogin, setShowLogin] = useState(false);
   const [isDesktop, setIsDesktop] = useState(false);
 
-  // Mock sessions state (implement with real session management)
+  // FIXED: Real session management instead of mock
   const [sessions, setSessions] = useState<ChatSession[]>([]);
   const [currentSessionId, setCurrentSessionId] = useState<string | null>(null);
+  const [isLoadingSessions, setIsLoadingSessions] = useState(true);
 
   // FIXED: Enhanced sidebar toggle with responsive logic
   const toggleSidebar = useCallback(() => {
@@ -317,8 +331,17 @@ export const ChatBot: React.FC = () => {
     sendMessage,
     continueMessage,
     clearMessages,
-    retryLastMessage
-  } = useChat();
+    retryLastMessage,
+    loadMessages
+  } = useChat({
+    onError: (error) => {
+      console.error('Chat error:', error);
+    },
+    onSuccess: (response) => {
+      // Update usage after successful message
+      updateUsage('message');
+    }
+  });
 
   // ========================================
   // VOICE & SPEECH HOOKS
@@ -366,8 +389,126 @@ export const ChatBot: React.FC = () => {
   const textareaRef = useRef<HTMLTextAreaElement>(null);
 
   // ========================================
+  // FIXED: DATABASE INTEGRATION FUNCTIONS
+  // ========================================
+
+  // Load user sessions from database
+  const loadUserSessions = useCallback(async () => {
+    if (!user?.id) {
+      setSessions([]);
+      setIsLoadingSessions(false);
+      return;
+    }
+
+    try {
+      setIsLoadingSessions(true);
+      const userSessions = await getUserSessions(user.id);
+      
+      const formattedSessions: ChatSession[] = userSessions.map(session => ({
+        id: session.id,
+        user_id: session.user_id,
+        title: session.title,
+        message_count: session.message_count || 0,
+        last_message_at: session.last_message_at || session.updated_at,
+        context_summary: session.context_summary,
+        settings: session.settings,
+        is_active: session.is_active,
+        created_at: session.created_at,
+        updated_at: session.updated_at
+      }));
+
+      setSessions(formattedSessions);
+      
+      // Set current session to the most recent one if none selected
+      if (!currentSessionId && formattedSessions.length > 0) {
+        setCurrentSessionId(formattedSessions[0].id);
+      }
+    } catch (error) {
+      console.error('Error loading sessions:', error);
+      setSessions([]);
+    } finally {
+      setIsLoadingSessions(false);
+    }
+  }, [user?.id, currentSessionId]);
+
+  // Create new session
+  const createNewSession = useCallback(async (title?: string) => {
+    if (!user?.id) {
+      // For guests, just create a temporary session
+      const tempSessionId = generateId();
+      setCurrentSessionId(tempSessionId);
+      clearMessages();
+      return tempSessionId;
+    }
+
+    try {
+      const sessionTitle = title || `Chat ${new Date().toLocaleDateString()}`;
+      const newSession = await createChatSession(user.id, sessionTitle);
+      
+      if (newSession) {
+        const formattedSession: ChatSession = {
+          id: newSession.id,
+          user_id: newSession.user_id,
+          title: newSession.title,
+          message_count: 0,
+          last_message_at: newSession.created_at,
+          context_summary: undefined,
+          settings: newSession.settings,
+          is_active: true,
+          created_at: newSession.created_at,
+          updated_at: newSession.updated_at
+        };
+
+        setSessions(prev => [formattedSession, ...prev]);
+        setCurrentSessionId(newSession.id);
+        clearMessages();
+        return newSession.id;
+      }
+    } catch (error) {
+      console.error('Error creating new session:', error);
+    }
+    return null;
+  }, [user?.id, clearMessages]);
+
+  // Load session messages
+  const loadSessionMessages = useCallback(async (sessionId: string) => {
+    if (!user?.id) return; // Skip for guests
+
+    try {
+      const sessionMessages = await getSessionMessages(sessionId);
+      
+      const formattedMessages: Message[] = sessionMessages.map(msg => ({
+        id: msg.id,
+        content: msg.content,
+        role: msg.role as 'user' | 'assistant',
+        timestamp: new Date(msg.created_at || msg.timestamp),
+        attachments: msg.attachments || [],
+        metadata: msg.metadata
+      }));
+
+      loadMessages(formattedMessages, sessionId);
+    } catch (error) {
+      console.error('Error loading session messages:', error);
+    }
+  }, [user?.id, loadMessages]);
+
+  // ========================================
   // EFFECTS
   // ========================================
+
+  // Load sessions when user changes
+  useEffect(() => {
+    if (!authLoading) {
+      loadUserSessions();
+    }
+  }, [user?.id, authLoading, loadUserSessions]);
+
+  // Load current session messages when currentSessionId changes
+  useEffect(() => {
+    if (currentSessionId && user?.id) {
+      loadSessionMessages(currentSessionId);
+    }
+  }, [currentSessionId, user?.id, loadSessionMessages]);
 
   // Hide welcome message when chat starts
   useEffect(() => {
@@ -419,11 +560,10 @@ export const ChatBot: React.FC = () => {
       setInput('');
       setFiles([]);
       setIsFocused(false); // Reset focus state after send
-      updateUsage('message');
     } catch (error) {
       console.error('Failed to send message:', error);
     }
-  }, [input, files, canSendMessage, sendMessage, updateUsage, currentSessionId]);
+  }, [input, files, canSendMessage, sendMessage, currentSessionId]);
 
   // Key press handler
   const handleKeyPress = useCallback((e: React.KeyboardEvent) => {
@@ -453,10 +593,11 @@ export const ChatBot: React.FC = () => {
     setFiles(prev => prev.filter(f => f.id !== fileId));
   }, []);
 
-  // Session handlers
+  // FIXED: Session handlers with database integration
   const handleSessionSelect = useCallback(async (sessionId: string) => {
     try {
       setCurrentSessionId(sessionId);
+      await loadSessionMessages(sessionId);
       
       // FIXED: Close sidebar on mobile/tablet after selection
       if (!isDesktop) {
@@ -465,28 +606,40 @@ export const ChatBot: React.FC = () => {
     } catch (error) {
       console.error('Failed to load session:', error);
     }
-  }, [isDesktop, closeSidebar]);
+  }, [isDesktop, closeSidebar, loadSessionMessages]);
 
-  const handleSessionDelete = useCallback((sessionId: string) => {
-    setSessions(prev => prev.filter(s => s.id !== sessionId));
-    if (currentSessionId === sessionId) {
-      setCurrentSessionId(null);
-      clearMessages();
+  const handleSessionDelete = useCallback(async (sessionId: string) => {
+    try {
+      const success = await deleteSession(sessionId);
+      
+      if (success) {
+        setSessions(prev => prev.filter(s => s.id !== sessionId));
+        
+        // If current session was deleted, clear messages and set new current session
+        if (currentSessionId === sessionId) {
+          clearMessages();
+          const remainingSessions = sessions.filter(s => s.id !== sessionId);
+          if (remainingSessions.length > 0) {
+            setCurrentSessionId(remainingSessions[0].id);
+            await loadSessionMessages(remainingSessions[0].id);
+          } else {
+            setCurrentSessionId(null);
+          }
+        }
+      }
+    } catch (error) {
+      console.error('Error deleting session:', error);
     }
-  }, [currentSessionId, clearMessages]);
+  }, [currentSessionId, sessions, clearMessages, loadSessionMessages]);
 
-  const handleNewSession = useCallback(() => {
-    const newSessionId = generateId();
-    setCurrentSessionId(newSessionId);
-    clearMessages();
-    setInput('');
-    setFiles([]);
+  const handleNewSession = useCallback(async () => {
+    await createNewSession();
     
     // FIXED: Close sidebar on mobile/tablet after creating new session
     if (!isDesktop) {
       closeSidebar();
     }
-  }, [clearMessages, isDesktop, closeSidebar]);
+  }, [createNewSession, isDesktop, closeSidebar]);
 
   // Voice handlers
   const handleVoiceToggle = useCallback(() => {
@@ -573,7 +726,7 @@ export const ChatBot: React.FC = () => {
                 onNewSession={handleNewSession}
                 onClose={closeSidebar}
                 isOpen={true}
-                isLoading={isLoading}
+                isLoading={isLoadingSessions}
                 user={user}
                 profile={user}
                 isGuest={isGuest}
