@@ -338,8 +338,8 @@ export const ChatBot: React.FC = () => {
       console.error('Chat error:', error);
     },
     onSuccess: (response) => {
-      // Update usage after successful message
-      updateUsage('message');
+      // FIXED: Update usage after successful message with number
+      updateUsage(1);
     }
   });
 
@@ -539,7 +539,7 @@ export const ChatBot: React.FC = () => {
   // EVENT HANDLERS
   // ========================================
 
-  // Send message handler
+  // FIXED: Send message handler - LINE 342 FIX
   const handleSendMessage = useCallback(async (messageText?: string) => {
     const textToSend = messageText || input.trim();
     
@@ -557,9 +557,12 @@ export const ChatBot: React.FC = () => {
         sessionId: currentSessionId || undefined
       });
 
+      // FIXED LINE 342: updateUsage dengan parameter number (1), bukan string
+      // updateUsage(1); - REMOVED dari sini karena sudah ada di useChat onSuccess
+
       setInput('');
       setFiles([]);
-      setIsFocused(false); // Reset focus state after send
+      setIsFocused(false);
     } catch (error) {
       console.error('Failed to send message:', error);
     }

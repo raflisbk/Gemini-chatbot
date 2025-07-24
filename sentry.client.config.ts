@@ -1,61 +1,75 @@
-import * as Sentry from '@sentry/nextjs';
-import { Replay } from '@sentry/replay';
+// sentry.client.config.ts - FIXED VERSION TO PREVENT DOUBLE INIT
 
-Sentry.init({
-  dsn: process.env.NEXT_PUBLIC_SENTRY_DSN,
-  
-  // Performance monitoring
-  tracesSampleRate: process.env.NODE_ENV === 'production' ? 0.1 : 1.0,
-  
-  // Session replay for debugging
-  replaysSessionSampleRate: 0.1,
-  replaysOnErrorSampleRate: 1.0,
-  
-  // Environment
-  environment: process.env.NODE_ENV,
-  release: process.env.SENTRY_RELEASE || process.env.npm_package_version,
-  
-  // Error filtering
-  beforeSend(event, hint) {
-    // Filter out known non-critical errors
-    const error = hint.originalException;
+import * as Sentry from "@sentry/nextjs";
+
+// Prevent multiple initialization
+let isInitialized = false;
+
+if (!isInitialized && typeof window !== 'undefined') {
+  Sentry.init({
+    dsn: process.env.NEXT_PUBLIC_SENTRY_DSN || "https://bea25b86f3b290dba83ab1c8efe053c7@o4509596648013904.ingest.de.sentry.io/4509596648013904",
+
+    integrations: [
+      // Only initialize replay in browser environment
+      Sentry.replayIntegration({
+        maskAllText: true,
+        blockAllMedia: true,
+      }),
+    ],
     
-    if (error && error instanceof Error) {
-      // Skip network errors in development
-      if (process.env.NODE_ENV === 'development' && 
-          (error.message.includes('NetworkError') || 
-           error.message.includes('fetch'))) {
-        return null;
-      }
-      
-      // Skip cancelled requests
-      if (error.message.includes('AbortError') || 
-          error.message.includes('The operation was aborted')) {
-        return null;
-      }
-      
-      // Skip hydration errors (common in development)
-      if (error.message.includes('Hydration') || 
-          error.message.includes('hydrating')) {
-        return null;
-      }
-    }
+    // Performance Monitoring
+    tracesSampleRate: process.env.NODE_ENV === 'production' ? 0.1 : 1.0,
     
-    return event;
-  },
-  
-  // User context
-  initialScope: {
-    tags: {
-      component: 'frontend',
-      app: 'ai-chatbot-indonesia'
-    }
-  },
-  
-  integrations: [
-    new Replay({
-      maskAllText: false,
-      blockAllMedia: false,
-    }),
-  ],
-});
+    // Session Replay
+    replaysSessionSampleRate: process.env.NODE_ENV === 'production' ? 0.1 : 1.0,
+    replaysOnErrorSampleRate: 1.0,
+
+    // Debug mode
+    debug: process.env.NODE_ENV === 'development',
+
+    // Environment
+    environment: process.env.NODE_ENV || 'development',
+
+    // Release tracking
+    release: process.env.VERCEL_GIT_COMMIT_SHA || 'development',
+
+    // Error filtering
+    beforeSend(event, hint) {
+      // Filter out development errors
+      if (process.env.NODE_ENV === 'development') {
+        console.warn('Sentry event captured:', event);
+      }
+
+      // Filter out specific errors
+      if (event.exception) {
+        const error = hint.originalException;
+        
+        // Skip common development errors
+        if (error instanceof Error) {
+          if (error.message.includes('Non-Error promise rejection captured')) {
+            return null;
+          }
+          if (error.message.includes('ResizeObserver loop limit exceeded')) {
+            return null;
+          }
+          if (error.message.includes('Network request failed')) {
+            return null;
+          }
+        }
+      }
+
+      return event;
+    },
+
+    // Additional configuration
+    beforeBreadcrumb(breadcrumb) {
+      // Filter out noisy breadcrumbs
+      if (breadcrumb.category === 'console' && breadcrumb.level === 'log') {
+        return null;
+      }
+      return breadcrumb;
+    },
+  });
+
+  isInitialized = true;
+}
